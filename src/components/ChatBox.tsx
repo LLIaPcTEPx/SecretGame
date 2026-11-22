@@ -87,7 +87,11 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
       <div className="chat-messages" ref={listRef}>
         {messages.map((m) => (
           <div key={m.id} className={`chat-msg chat-msg--${m.type}`}>
-            {m.type === 'player' && <span className="chat-sender">{m.sender}: </span>}
+            {m.type === 'player' && (
+              <span className="chat-sender" style={m.color ? { color: m.color } : undefined}>
+                {m.sender}:{' '}
+              </span>
+            )}
             {m.type === 'secret' && <span className="chat-sender">★ </span>}
             {m.type === 'whisper' && <span className="chat-sender">◈ </span>}
             <span className="chat-text">{m.text}</span>

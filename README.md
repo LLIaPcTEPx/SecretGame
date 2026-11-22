@@ -1,26 +1,28 @@
-# Secret Universe 3D — 100 Секретов
+# Secret Universe 3D — 100 Secrets (Multiplayer Edition)
 
-3D-игра по поиску секретов в стиле Roblox **Secret Universe** (Three.js + React + TypeScript + Vite).
+A Roblox-inspired 3D secret-hunting game built with **Three.js + React + TypeScript + Vite + Node.js WebSockets**.
 
-## Особенности
-- **100 уникальных секретов** по таблице сложности (**Difficulty Chart**):
-  - 🟢 **Easy** (24 секрета, включая стартовый `Welcome!`)
-  - 🟡 **Medium** (22 секрета)
-  - 🟠 **Hard** (18 секретов)
-  - 🔴 **Amazing** (15 секретов)
-  - 🟣 **Okay?** (12 секретов)
-  - ⚫ **Best** (9 секретов)
-- **7 игровых зон**: Площадь Спавна, Шепчущий Лес и Руины, Библиотека Шифров, Техно-Лаборатория, Вулканическая Пещера, Небесная Обсерватория (Обби), Тайный Остров Бездны.
-- **Камера как в Роблоксе**:
-  - **ShiftLock** (`Shift`) со смещением за плечо, прицелом и фиксацией поворота персонажа.
-  - **Отдаление камеры** (колёсико / `O`) для поиска посланий на крышах, в небе, под островами и сквозь стены.
-  - **Режим от первого лица** (максимальное приближение колёсиком / `I`) для замочных скважин, телескопа и микро-текстов.
-- **Index (`Tab`)** со всеми 100 секретами, фильтрами по 6 сложностям, поиском, подсказками и скрытыми мета-секретами.
-- **Пауза и Настройки (`Esc`)**: Настройка графики `1–5` (с реальным изменением рендера + секретные последовательности нажатий!), Чувствительность мыши, FOV, ShiftLock, Громкость звуков/музыки, Координаты и FPS.
-- **Чат (`/` или `Enter`)**: обычные слова-отгадки, облачка текста над головой (BubbleChat), эмоции (`/dance`, `/wave`, `/sit`, `/cheer`, `/laugh`) и десятки секретных `/` команд.
+## Features
+- **Real-Time Multiplayer & Authentication**:
+  - Register or Log In on first visit to immediately join the live multiplayer server.
+  - See other online players in 3D with custom avatar colors, floating username nameplates (`★` badge for friends), walking/jumping/emote animations, overhead 3D Bubble Chat, player-on-player head-stacking physics, and `[E]` High-Five interactions.
+  - **Friends System (`P` or HUD Friends button)**: add friends by username or from the live Online Players list, accept/decline incoming friend requests, track online status/zones, and teleport to online friends.
+- **Strictly Client-Side Personal Secrets & Progressive Empty-to-Full Lego World**:
+  - Each player has their own personal secret inventory (saved per account on the client) and builds their own world.
+  - Starts from an empty world (only a glowing starter pad) and progressively constructs **32 distinct structures** via Lego-style construction cutscenes (camera focus → bottom-to-top brick assembly → single white flash → 0.5s hold → smooth return).
+- **100 Unique Secrets across the 6 Difficulty Chart Tiers**:
+  - 🟢 **Easy** (24 secrets, starting with `Welcome!`)
+  - 🟡 **Medium** (22 secrets)
+  - 🟠 **Hard** (18 secrets)
+  - 🔴 **Amazing** (15 secrets)
+  - 🟣 **Okay?** (12 secrets)
+  - ⚫ **Best** (9 secrets, including co-op Multiplayer secrets: `#96 Kindred Spirits`, `#97 Sky Riders`, and `#100 Unity of the Universe`)
+- **Full Bilingual Localization**: English by default, switchable live between **English** and **Russian** in Settings (including in-world 3D signs).
+- **Roblox-Style Camera, Index (`Tab`), Pause/Settings (`Esc`), and Chat (`/` or `Enter`)**.
 
-## Запуск
+## Running Locally
 ```bash
 npm install
-npm run dev
+npm run server   # Terminal 1: Multiplayer HTTP + WebSocket server (port 3001)
+npm run dev      # Terminal 2: Vite frontend with /api and /ws proxy (port 5173)
 ```

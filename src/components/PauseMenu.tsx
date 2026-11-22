@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Gamepad2,
   Globe,
+  LogOut,
   Play,
   RotateCcw,
   Settings,
@@ -15,10 +16,12 @@ import { GRAPHICS_LABELS_I18N, UI_TEXT } from '../i18n/translations';
 
 interface PauseMenuProps {
   settings: GameSettings;
+  username: string;
   onChangeSettings: (next: GameSettings) => void;
   onResume: () => void;
   onRespawn: () => void;
   onResetProgress: () => void;
+  onLogout: () => void;
   onHiddenPiClick: () => void;
   onSettingsTitleTripleClick: () => void;
   unlockedCount: number;
@@ -26,10 +29,12 @@ interface PauseMenuProps {
 
 export const PauseMenu: React.FC<PauseMenuProps> = ({
   settings,
+  username,
   onChangeSettings,
   onResume,
   onRespawn,
   onResetProgress,
+  onLogout,
   onHiddenPiClick,
   onSettingsTitleTripleClick,
   unlockedCount,
@@ -66,7 +71,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
             <div>
               <h2>{UI_TEXT.pauseTitle[lang]}</h2>
               <p>
-                Secret Universe 3D • {UI_TEXT.secretsCountLabel[lang]}: {unlockedCount} / 100
+                @{username} • {UI_TEXT.secretsCountLabel[lang]}: {unlockedCount} / 100
               </p>
             </div>
           </div>
@@ -325,6 +330,10 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                 <span>{UI_TEXT.ctrlIndexDesc[lang]}</span>
               </div>
               <div className="control-card">
+                <kbd>P</kbd>
+                <span>{UI_TEXT.ctrlSocialDesc[lang]}</span>
+              </div>
+              <div className="control-card">
                 <kbd>Esc</kbd>
                 <span>{UI_TEXT.ctrlPauseDesc[lang]}</span>
               </div>
@@ -363,6 +372,10 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
               {UI_TEXT.resetConfirm[lang]}
             </button>
           )}
+
+          <button className="btn-secondary" onClick={onLogout}>
+            <LogOut size={15} /> {UI_TEXT.logoutBtn[lang]}
+          </button>
 
           {tab === 'settings' && (
             <button

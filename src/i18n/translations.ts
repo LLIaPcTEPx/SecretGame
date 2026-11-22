@@ -25,6 +25,50 @@ export const CATEGORY_LABELS_I18N: Record<SecretCategory, LocalizedText> = {
   parkour: { en: 'Parkour', ru: 'Паркур' },
   meta: { en: 'Meta', ru: 'Мета' },
   time: { en: 'Time', ru: 'Время' },
+  multiplayer: { en: 'Multiplayer', ru: 'Мультиплеер' },
+};
+
+export const AUTH_ERRORS_I18N: Record<string, LocalizedText> = {
+  INVALID_USERNAME: {
+    en: 'Username must be 3–18 characters (letters, numbers, _ or -).',
+    ru: 'Имя должно быть от 3 до 18 символов (буквы, цифры, _ или -).',
+  },
+  INVALID_PASSWORD: {
+    en: 'Password must be at least 4 characters.',
+    ru: 'Пароль должен содержать минимум 4 символа.',
+  },
+  USERNAME_TAKEN: {
+    en: 'That username is already taken!',
+    ru: 'Это имя пользователя уже занято!',
+  },
+  INVALID_CREDENTIALS: {
+    en: 'Wrong username or password.',
+    ru: 'Неверный логин или пароль.',
+  },
+  USER_NOT_FOUND: {
+    en: 'Player with that username was not found.',
+    ru: 'Игрок с таким именем не найден.',
+  },
+  CANNOT_ADD_SELF: {
+    en: 'You cannot add yourself as a friend!',
+    ru: 'Нельзя добавить самого себя в друзья!',
+  },
+  ALREADY_FRIENDS: {
+    en: 'You are already friends with this player.',
+    ru: 'Вы уже друзья с этим игроком.',
+  },
+  REQUEST_ALREADY_SENT: {
+    en: 'Friend request already sent.',
+    ru: 'Заявка в друзья уже отправлена.',
+  },
+  REQUEST_NOT_FOUND: {
+    en: 'Friend request not found.',
+    ru: 'Заявка в друзья не найдена.',
+  },
+  NETWORK_ERROR: {
+    en: 'Could not connect to the multiplayer server.',
+    ru: 'Не удалось подключиться к серверу мультиплеера.',
+  },
 };
 
 export const GRAPHICS_LABELS_I18N: Record<1 | 2 | 3 | 4 | 5, LocalizedText> = {
@@ -167,4 +211,65 @@ export const UI_TEXT = {
   ctrlChatDesc: { en: 'Open chat to type words or /commands', ru: 'Открыть чат и ввести слово или /команду' },
   ctrlIndexDesc: { en: 'Open / close Index (100 secrets)', ru: 'Открыть / закрыть Index (100 секретов)' },
   ctrlPauseDesc: { en: 'Pause menu & Settings', ru: 'Пауза и Настройки' },
+  ctrlSocialDesc: { en: 'Open Players & Friends menu', ru: 'Открыть меню Игроков и Друзей' },
+
+  // Auth Screen
+  authSubtitle: {
+    en: 'Multiplayer Edition • Register or Log In to join the server immediately!',
+    ru: 'Мультиплеер • Зарегистрируйся или войди, чтобы сразу попасть на сервер!',
+  },
+  authLoginTab: { en: 'Log In', ru: 'Войти' },
+  authRegisterTab: { en: 'Register', ru: 'Регистрация' },
+  authUsernameLabel: { en: 'Username', ru: 'Имя игрока' },
+  authUsernamePlaceholder: { en: 'Enter your nickname...', ru: 'Введи свой ник...' },
+  authPasswordLabel: { en: 'Password', ru: 'Пароль' },
+  authPasswordPlaceholder: { en: 'At least 4 characters...', ru: 'Минимум 4 символа...' },
+  authAvatarColor: { en: 'Avatar Color', ru: 'Цвет аватара' },
+  authEnterServer: { en: 'Enter Server', ru: 'Войти на сервер' },
+  authCreateAndJoin: { en: 'Create Account & Join', ru: 'Создать аккаунт и войти' },
+  authConnecting: { en: 'Connecting to server...', ru: 'Подключение к серверу...' },
+  authClientNote: {
+    en: 'Your 100 secrets and world buildings are personal (client-side), while players, chat, friends & co-op secrets are live multiplayer!',
+    ru: 'Твои 100 секретов и постройки мира — личные (клиентские), а игроки, чат, друзья и совместные секреты — в реальном времени!',
+  },
+  logoutBtn: { en: 'Log Out', ru: 'Выйти из аккаунта' },
+
+  // Social / Friends Modal & HUD
+  friendsBtn: { en: 'Friends', ru: 'Друзья' },
+  onlineCount: { en: 'Online', ru: 'Онлайн' },
+  serverOnline: { en: 'Online', ru: 'В сети' },
+  serverReconnecting: { en: 'Reconnecting...', ru: 'Переподключение...' },
+  socialTitle: { en: 'PLAYERS & FRIENDS', ru: 'ИГРОКИ И ДРУЗЬЯ' },
+  socialSubtitle: {
+    en: 'Real-time multiplayer server • Personal client-side secrets',
+    ru: 'Сервер мультиплеера • Секреты у каждого игрока свои',
+  },
+  tabOnlinePlayers: { en: 'On Server', ru: 'На сервере' },
+  tabFriendsList: { en: 'Friends', ru: 'Друзья' },
+  tabRequests: { en: 'Requests', ru: 'Заявки' },
+  addFriendByName: { en: 'Add friend by username...', ru: 'Добавить друга по нику...' },
+  sendRequestBtn: { en: 'Add Friend', ru: 'Добавить' },
+  friendRequestSent: { en: 'Friend request sent!', ru: 'Заявка в друзья отправлена!' },
+  friendRequestAccepted: { en: 'Friend added!', ru: 'Друг добавлен!' },
+  alreadyFriendBadge: { en: 'Friend', ru: 'Друг' },
+  requestPendingBadge: { en: 'Pending', ru: 'Ожидание' },
+  youBadge: { en: 'You', ru: 'Вы' },
+  acceptBtn: { en: 'Accept', ru: 'Принять' },
+  declineBtn: { en: 'Decline', ru: 'Отклонить' },
+  cancelBtn: { en: 'Cancel', ru: 'Отменить' },
+  removeFriendBtn: { en: 'Remove', ru: 'Удалить' },
+  teleportBtn: { en: 'Teleport', ru: 'К другу' },
+  incomingRequests: { en: 'Incoming Requests', ru: 'Входящие заявки' },
+  outgoingRequests: { en: 'Outgoing Requests', ru: 'Исходящие заявки' },
+  noFriendsYet: {
+    en: 'No friends yet. Add players from the server list or by username!',
+    ru: 'Пока нет друзей. Добавь игроков из списка сервера или по нику!',
+  },
+  noOtherPlayers: {
+    en: 'No other players on the server right now. Invite a friend (or open a second tab with another account)!',
+    ru: 'Сейчас на сервере нет других игроков. Пригласи друга (или открой вторую вкладку с другим аккаунтом)!',
+  },
+  noRequests: { en: 'No pending friend requests.', ru: 'Нет активных заявок в друзья.' },
+  offlineLabel: { en: 'Offline', ru: 'Не в сети' },
+  highFivePrompt: { en: 'High-Five', ru: 'Дать пять' },
 } as const;

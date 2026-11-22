@@ -17,7 +17,8 @@ export type SecretCategory =
   | 'settings'
   | 'parkour'
   | 'meta'
-  | 'time';
+  | 'time'
+  | 'multiplayer';
 
 export interface DifficultyDef {
   id: DifficultyId;
@@ -94,3 +95,57 @@ export interface HudSnapshot {
   bubbleText: string | null;
   bubbleScreenPos: { x: number; y: number; visible: boolean };
 }
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  avatarColor: string;
+  createdAt?: number;
+}
+
+export interface RemotePlayerData {
+  userId: string;
+  username: string;
+  avatarColor: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  speed: number;
+  grounded: boolean;
+  velY: number;
+  zone: ZoneId;
+  secretCount: number;
+}
+
+export interface FriendInfo {
+  id: string;
+  username: string;
+  avatarColor: string;
+  online: boolean;
+  zone: ZoneId | null;
+  secretCount: number;
+}
+
+export interface FriendRequestInfo {
+  id: string;
+  userId: string;
+  username: string;
+  avatarColor: string;
+  createdAt: number;
+}
+
+export interface FriendsState {
+  friends: FriendInfo[];
+  incoming: FriendRequestInfo[];
+  outgoing: FriendRequestInfo[];
+}
+
+export interface HighFiveEvent {
+  fromUserId: string;
+  fromUsername: string;
+  toUserId: string;
+  toUsername: string;
+  ts: number;
+}
+

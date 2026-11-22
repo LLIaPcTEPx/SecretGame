@@ -10,6 +10,9 @@ import {
   Menu,
   Sparkles,
   Unlock,
+  Users,
+  Wifi,
+  WifiOff,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -20,8 +23,13 @@ interface HUDProps {
   hud: HudSnapshot;
   unlockedCount: number;
   settings: GameSettings;
+  username: string;
+  onlineCount: number;
+  serverConnected: boolean;
+  pendingRequestsCount: number;
   onOpenIndex: () => void;
   onOpenPause: () => void;
+  onOpenSocial: () => void;
   onToggleShiftLock: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -32,8 +40,13 @@ export const HUD: React.FC<HUDProps> = ({
   hud,
   unlockedCount,
   settings,
+  username,
+  onlineCount,
+  serverConnected,
+  pendingRequestsCount,
   onOpenIndex,
   onOpenPause,
+  onOpenSocial,
   onToggleShiftLock,
   onZoomIn,
   onZoomOut,
@@ -85,6 +98,10 @@ export const HUD: React.FC<HUDProps> = ({
           <div className="zone-pill">
             <Compass size={15} />
             <span>{hud.zoneName}</span>
+            <span className={`net-pill ${serverConnected ? 'net-pill--on' : 'net-pill--off'}`}>
+              {serverConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
+              <span>@{username}</span>
+            </span>
             {hud.relicCount > 0 && (
               <span className="relic-badge">
                 ★ {UI_TEXT.relics[lang]}: {hud.relicCount}/3
@@ -107,9 +124,18 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* Top Right: Secret Counter, Index, Pause */}
+      {/* Top Right: Friends/Online, Secret Counter, Index, Pause */}
       {!inCutscene && (
         <div className="hud-top-right">
+          <button className="hud-chip hud-chip--social" onClick={onOpenSocial}>
+            <Users size={16} color="#38bdf8" />
+            <span>{UI_TEXT.friendsBtn[lang]}</span>
+            <span className="online-pill">{onlineCount}</span>
+            {pendingRequestsCount > 0 && (
+              <span className="hud-notif-dot">{pendingRequestsCount}</span>
+            )}
+          </button>
+
           <button className="hud-chip hud-chip--secrets" onClick={onOpenIndex}>
             <Sparkles size={16} color="#facc15" />
             <span className="hud-secret-num">{unlockedCount} / 100</span>

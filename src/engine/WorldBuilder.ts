@@ -115,7 +115,7 @@ export interface WorldData {
     time: number,
     graphics: number,
     isMaxZoomOut: boolean,
-    secretCount: number
+    unityBeamActive: boolean
   ) => void;
   getZoneAt: (pos: THREE.Vector3) => ZoneId;
 }
@@ -2719,7 +2719,7 @@ export function buildWorld(scene: THREE.Scene, initialLang: Language = 'en'): Wo
     time: number,
     graphics: number,
     isMaxZoomOut: boolean,
-    secretCount: number
+    unityBeamActive: boolean
   ) => {
     for (const item of animatedObjects) {
       if (item.structureId) {
@@ -2765,7 +2765,7 @@ export function buildWorld(scene: THREE.Scene, initialLang: Language = 'en'): Wo
       o.visible = showGlitch;
     }
 
-    finalBeam.visible = secretCount >= 99 && isStructureBuilt('fountain');
+    finalBeam.visible = unityBeamActive && isStructureBuilt('fountain');
   };
 
   const getZoneAt = (pos: THREE.Vector3): ZoneId => {

@@ -1,14 +1,17 @@
 import * as THREE from 'three';
-import { Avatar } from './Avatar';
+import { Avatar, EmoteType } from './Avatar';
 import { buildWorld, InteractableItem, WorldData, WorldStructure } from './WorldBuilder';
-import { PlayerContext, SecretManager } from './SecretManager';
+import { NearbyFriendInfo, PlayerContext, SecretManager } from './SecretManager';
 import { soundEngine } from '../audio/soundEngine';
-import { ZONE_NAMES_I18N } from '../i18n/translations';
+import { UI_TEXT, ZONE_NAMES_I18N } from '../i18n/translations';
 import {
+  AuthUser,
   ChatMessage,
   GameSettings,
+  HighFiveEvent,
   HudSnapshot,
   InspectContent,
+  RemotePlayerData,
   SecretDef,
   ZoneId,
 } from '../types/game';
@@ -28,6 +31,23 @@ interface ActiveCutscene {
   snappedIndices: Set<number>;
 }
 
+interface RemotePlayerEntity {
+  userId: string;
+  username: string;
+  avatarColor: string;
+  avatar: Avatar;
+  pos: THREE.Vector3;
+  targetPos: THREE.Vector3;
+  yaw: number;
+  targetYaw: number;
+  speed: number;
+  grounded: boolean;
+  velY: number;
+  zone: ZoneId;
+  secretCount: number;
+  lastDanceAt: number;
+}
+
 export interface GameEngineHooks {
   onHudUpdate: (hud: HudSnapshot) => void;
   onSecretUnlocked: (secret: SecretDef, total: number) => void;
@@ -36,7 +56,22 @@ export interface GameEngineHooks {
   onInspect: (content: InspectContent) => void;
   onOpenPause: () => void;
   onToggleIndex: () => void;
+  onToggleSocial: () => void;
   onFocusChat: (prefix?: string) => void;
+  onSendState: (state: {
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+    speed: number;
+    grounded: boolean;
+    velY: number;
+    zone: ZoneId;
+    secretCount: number;
+  }) => void;
+  onSendEmote: (emote: EmoteType) => void;
+  onSendChat: (text: string) => void;
+  onSendHighFive: (targetUserId: string) => void;
 }
 
 function easeInOutCubic(t: number): number {
@@ -91,6 +126,15 @@ export class GameEngine {
   private activeCutscene: ActiveCutscene | null = null;
   private modalOpen = false; // tracks Pause / Index / Inspect modals so cutscenes wait until visible!
 
+  // Multiplayer state
+  private authUser: AuthUser;
+  private remotePlayers = new Map<string, RemotePlayerEntity>();
+  private friendIds = new Set<string>();
+  private highFivedFriendIds = new Set<string>();
+  private standingOnPlayerId: string | null = null;
+  private nearbyHighFiveTarget: RemotePlayerEntity | null = null;
+  private highFiveGlowUntil = 0;
+
   // Input & UI lock
   private keys = new Set<string>();
   public uiBlocked = false;
@@ -110,8 +154,14 @@ export class GameEngine {
   private hudEmitAccum = 0;
   private disposed = false;
 
-  constructor(container: HTMLElement, initialSettings: GameSettings, hooks: GameEngineHooks) {
+  constructor(
+    container: HTMLElement,
+    initialSettings: GameSettings,
+    authUser: AuthUser,
+    hooks: GameEngineHooks
+  ) {
     this.container = container;
+    this.authUser = authUser;
     this.hooks = hooks;
     this.settings = { ...initialSettings };
 
@@ -153,7 +203,7 @@ export class GameEngine {
 
     // Build World (ALL structures start completely hidden / unbuilt!)
     this.world = buildWorld(this.scene, this.settings.language);
-    this.avatar = new Avatar();
+    this.avatar = new Avatar({ torsoColor: this.authUser.avatarColor });
     this.avatar.root.position.copy(this.position);
     this.scene.add(this.avatar.root);
 
@@ -172,7 +222,12 @@ export class GameEngine {
           this.respawn();
         },
         onChatMessage: (msg) => hooks.onChatMessage(msg),
-        onEmote: (em) => this.avatar.setEmote(em),
+        onPublicChat: (text) => hooks.onSendChat(text),
+        onEmote: (em) => {
+          this.avatar.setEmote(em);
+          hooks.onSendEmote(em);
+        },
+        onHighFiveNearest: () => this.tryHighFiveNearest(),
         onTeleport: (pos) => this.teleport(pos),
         onRespawn: () => this.respawn(),
         onGravityBoost: () => {
@@ -186,7 +241,9 @@ export class GameEngine {
           this.statusBanner = text;
         },
       },
-      this.settings.language
+      this.settings.language,
+      this.authUser.id,
+      this.authUser.username
     );
 
     // Restore already-unlocked structures immediately from saved progress (no cutscene replay on reload)
@@ -561,7 +618,191 @@ export class GameEngine {
     this.avatar.setEmote('none');
   }
 
+  public setRemotePlayers(players: RemotePlayerData[]): void {
+    const incomingIds = new Set(players.map((p) => p.userId));
+    for (const uid of [...this.remotePlayers.keys()]) {
+      if (!incomingIds.has(uid)) {
+        this.removeRemotePlayer(uid);
+      }
+    }
+    for (const p of players) {
+      if (p.userId === this.authUser.id) continue;
+      if (!this.remotePlayers.has(p.userId)) {
+        this.addRemotePlayer(p);
+      } else {
+        this.updateRemotePlayerState(p);
+      }
+    }
+  }
+
+  public addRemotePlayer(player: RemotePlayerData): void {
+    if (player.userId === this.authUser.id) return;
+    if (this.remotePlayers.has(player.userId)) {
+      this.updateRemotePlayerState(player);
+      return;
+    }
+    const avatar = new Avatar({
+      torsoColor: player.avatarColor,
+      username: player.username,
+      isFriend: this.friendIds.has(player.userId),
+    });
+    const pos = new THREE.Vector3(player.x, player.y, player.z);
+    avatar.root.position.copy(pos);
+    avatar.root.rotation.y = player.yaw;
+    this.scene.add(avatar.root);
+
+    this.remotePlayers.set(player.userId, {
+      userId: player.userId,
+      username: player.username,
+      avatarColor: player.avatarColor,
+      avatar,
+      pos: pos.clone(),
+      targetPos: pos.clone(),
+      yaw: player.yaw,
+      targetYaw: player.yaw,
+      speed: player.speed,
+      grounded: player.grounded,
+      velY: player.velY,
+      zone: player.zone,
+      secretCount: player.secretCount,
+      lastDanceAt: 0,
+    });
+  }
+
+  public removeRemotePlayer(userId: string): void {
+    const ent = this.remotePlayers.get(userId);
+    if (!ent) return;
+    this.scene.remove(ent.avatar.root);
+    ent.avatar.dispose();
+    this.remotePlayers.delete(userId);
+    if (this.standingOnPlayerId === userId) this.standingOnPlayerId = null;
+    if (this.nearbyHighFiveTarget?.userId === userId) this.nearbyHighFiveTarget = null;
+  }
+
+  public updateRemotePlayerState(state: {
+    userId: string;
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+    speed: number;
+    grounded: boolean;
+    velY: number;
+    zone: ZoneId;
+    secretCount: number;
+  }): void {
+    const ent = this.remotePlayers.get(state.userId);
+    if (!ent) return;
+    ent.targetPos.set(state.x, state.y, state.z);
+    ent.targetYaw = state.yaw;
+    ent.speed = state.speed;
+    ent.grounded = state.grounded;
+    ent.velY = state.velY;
+    ent.zone = state.zone;
+    ent.secretCount = state.secretCount;
+  }
+
+  public handleRemotePlayerEmote(userId: string, emote: string): void {
+    const ent = this.remotePlayers.get(userId);
+    if (!ent) return;
+    if (emote === 'dance' || emote === 'wave' || emote === 'sit' || emote === 'cheer' || emote === 'laugh') {
+      ent.avatar.setEmote(emote);
+    }
+    if (emote === 'dance') {
+      ent.lastDanceAt = Date.now();
+    }
+    const dist = this.position.distanceTo(ent.pos);
+    this.secretManager.onRemoteEmote(userId, emote, dist, this.friendIds.has(userId));
+  }
+
+  public handleRemotePlayerChat(userId: string, text: string): void {
+    const ent = this.remotePlayers.get(userId);
+    if (ent) {
+      ent.avatar.showBubble(text);
+    }
+  }
+
+  public handleHighFive(ev: HighFiveEvent): void {
+    const isSender = ev.fromUserId === this.authUser.id;
+    const otherId = isSender ? ev.toUserId : ev.fromUserId;
+    const otherName = isSender ? ev.toUsername : ev.fromUsername;
+
+    soundEngine.playBuildComplete();
+    this.avatar.setEmote('wave');
+    this.highFiveGlowUntil = Date.now() + 2600;
+
+    const remote = this.remotePlayers.get(otherId);
+    if (remote) {
+      remote.avatar.setEmote('wave');
+    }
+
+    if (this.friendIds.has(otherId)) {
+      this.highFivedFriendIds.add(otherId);
+    }
+
+    const isRu = this.settings.language === 'ru';
+    this.secretManager.systemMsg(
+      isRu
+        ? `🙌 Вы дали Пять игроку ${otherName}!`
+        : `🙌 You High-Fived ${otherName}!`,
+      'whisper'
+    );
+  }
+
+  public setFriendIds(friendIds: Set<string>): void {
+    this.friendIds = new Set(friendIds);
+    for (const ent of this.remotePlayers.values()) {
+      ent.avatar.setFriendBadge(this.friendIds.has(ent.userId));
+    }
+  }
+
+  public teleportToPlayer(userId: string): boolean {
+    const ent = this.remotePlayers.get(userId);
+    if (!ent) return false;
+    // Place slightly beside the friend
+    const dest = ent.pos.clone().add(new THREE.Vector3(1.8, 0.5, 1.8));
+    this.teleport(dest);
+    soundEngine.playPortal();
+    return true;
+  }
+
+  public tryHighFiveNearest(): void {
+    let best: RemotePlayerEntity | null = null;
+    let bestDist = 5.5;
+    for (const ent of this.remotePlayers.values()) {
+      const d = this.position.distanceTo(ent.pos);
+      if (d < bestDist) {
+        best = ent;
+        bestDist = d;
+      }
+    }
+    if (!best) {
+      soundEngine.playError();
+      const isRu = this.settings.language === 'ru';
+      this.secretManager.systemMsg(
+        isRu
+          ? 'Рядом нет других игроков, чтобы дать Пять! Подойди ближе к игроку.'
+          : 'No other player nearby to High-Five! Walk closer to another player.',
+        'system'
+      );
+      return;
+    }
+    this.hooks.onSendHighFive(best.userId);
+  }
+
   public getPlayerContext(): PlayerContext {
+    const nearbyFriends: NearbyFriendInfo[] = [];
+    for (const ent of this.remotePlayers.values()) {
+      if (this.friendIds.has(ent.userId)) {
+        nearbyFriends.push({
+          userId: ent.userId,
+          username: ent.username,
+          distance: this.position.distanceTo(ent.pos),
+          lastDanceAt: ent.lastDanceAt,
+        });
+      }
+    }
+
     return {
       position: this.position.clone(),
       zone: this.currentZone,
@@ -573,11 +814,20 @@ export class GameEngine {
       settings: this.settings,
       peakFallY: this.peakFallY,
       isMovingBackwards: this.keys.has('KeyS') || this.keys.has('ArrowDown'),
+      founderStatueBuilt: this.world.isStructureBuilt('founder_statue'),
+      standingOnPlayerId: this.standingOnPlayerId,
+      nearbyFriends,
+      highFivedFriendIds: this.highFivedFriendIds,
     };
   }
 
   public triggerInteract(): void {
-    if (!this.currentInteractable || this.activeCutscene) return;
+    if (this.activeCutscene) return;
+    if (!this.currentInteractable && this.nearbyHighFiveTarget) {
+      this.hooks.onSendHighFive(this.nearbyHighFiveTarget.userId);
+      return;
+    }
+    if (!this.currentInteractable) return;
     const item = this.currentInteractable;
     const isRu = this.settings.language === 'ru';
 
@@ -657,6 +907,12 @@ export class GameEngine {
     window.removeEventListener('mousemove', this.onMouseMove);
     dom.removeEventListener('wheel', this.onWheel);
     dom.removeEventListener('contextmenu', this.onContextMenu);
+
+    for (const ent of this.remotePlayers.values()) {
+      this.scene.remove(ent.avatar.root);
+      ent.avatar.dispose();
+    }
+    this.remotePlayers.clear();
 
     this.renderer.dispose();
     if (dom.parentElement) dom.parentElement.removeChild(dom);
@@ -765,6 +1021,12 @@ export class GameEngine {
       return;
     }
 
+    if (e.code === 'KeyP' && !this.uiBlocked) {
+      e.preventDefault();
+      this.hooks.onToggleSocial();
+      return;
+    }
+
     if (this.uiBlocked) return;
 
     if (e.key === '/') {
@@ -833,6 +1095,7 @@ export class GameEngine {
     this.startNextCutsceneIfReady();
 
     this.updatePhysics(dt);
+    this.updateRemotePlayers(dt);
 
     if (this.activeCutscene) {
       this.updateCutscene(dt);
@@ -841,24 +1104,50 @@ export class GameEngine {
     }
 
     this.updateInteractables();
+
+    let unityBeamActive = this.secretManager.unlocked.has(100);
+    if (!unityBeamActive) {
+      for (const ent of this.remotePlayers.values()) {
+        if (this.friendIds.has(ent.userId) && Math.hypot(ent.pos.x, ent.pos.z) <= 13) {
+          unityBeamActive = true;
+          break;
+        }
+      }
+    }
+
     this.world.updateDynamicVisuals(
       this.elapsedTime,
       this.settings.graphicsQuality,
       this.isMaxZoomOut,
-      this.secretManager.unlocked.size
+      unityBeamActive
     );
 
     if (!this.activeCutscene) {
       this.secretManager.update(dt, this.getPlayerContext());
     }
 
-    if (this.statusBanner && (this.statusBanner.includes('s') || this.statusBanner.includes('сек'))) {
+    if (Date.now() < this.highFiveGlowUntil) {
+      this.avatar.setAura(0.75, 0xfde047);
+    } else if (this.statusBanner && (this.statusBanner.includes('s') || this.statusBanner.includes('сек'))) {
       this.avatar.setAura(0.55 + Math.sin(this.elapsedTime * 5) * 0.25, 0xfacc15);
     } else if (this.shiftLockActive) {
       this.avatar.setAura(0.28, 0x38bdf8);
     } else {
       this.avatar.setAura(0, 0x38bdf8);
     }
+
+    // Stream local state to multiplayer server (~20Hz throttled inside MultiplayerClient)
+    this.hooks.onSendState({
+      x: this.position.x,
+      y: this.position.y,
+      z: this.position.z,
+      yaw: this.avatarYaw,
+      speed: Math.hypot(this.velocity.x, this.velocity.z),
+      grounded: this.grounded,
+      velY: this.velocity.y,
+      zone: this.currentZone,
+      secretCount: this.secretManager.unlocked.size,
+    });
 
     this.renderer.render(this.scene, this.camera);
 
@@ -868,6 +1157,27 @@ export class GameEngine {
       this.emitHud();
     }
   };
+
+  private updateRemotePlayers(dt: number): void {
+    const lerpFactor = Math.min(1, dt * 14);
+    for (const ent of this.remotePlayers.values()) {
+      const prevX = ent.pos.x;
+      const prevZ = ent.pos.z;
+      ent.pos.lerp(ent.targetPos, lerpFactor);
+      let diff = ent.targetYaw - ent.yaw;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      ent.yaw += diff * lerpFactor;
+
+      ent.avatar.root.position.copy(ent.pos);
+      ent.avatar.root.rotation.y = ent.yaw;
+      const visualSpeed = Math.max(
+        ent.speed,
+        Math.hypot(ent.pos.x - prevX, ent.pos.z - prevZ) / Math.max(0.001, dt)
+      );
+      ent.avatar.update(dt, visualSpeed, ent.grounded, ent.velY);
+    }
+  }
 
   private updatePhysics(dt: number): void {
     const moveSpeed = 10.6;
@@ -979,6 +1289,7 @@ export class GameEngine {
     // Resolve Y
     this.position.y += this.velocity.y * dt;
     this.grounded = false;
+    this.standingOnPlayerId = null;
     for (const c of this.world.colliders) {
       if (c.active === false || !this.world.isStructureBuilt(c.structureId)) continue;
       if (
@@ -1013,6 +1324,21 @@ export class GameEngine {
         } else if (this.velocity.y > 0) {
           this.position.y = c.minY - height;
           this.velocity.y = 0;
+        }
+      }
+    }
+
+    // Player-on-Player head-stacking collision (enables Secret #97: Sky Riders!)
+    if (this.velocity.y <= 0) {
+      for (const ent of this.remotePlayers.values()) {
+        const horiz = Math.hypot(this.position.x - ent.pos.x, this.position.z - ent.pos.z);
+        const headTopY = ent.pos.y + 2.42;
+        if (horiz <= 0.85 && this.position.y <= headTopY + 0.16 && this.position.y >= headTopY - 0.72) {
+          this.position.y = headTopY;
+          this.velocity.y = 0;
+          this.grounded = true;
+          this.standingOnPlayerId = ent.userId;
+          break;
         }
       }
     }
@@ -1098,6 +1424,7 @@ export class GameEngine {
   private updateInteractables(): void {
     if (this.activeCutscene) {
       this.currentInteractable = null;
+      this.nearbyHighFiveTarget = null;
       return;
     }
 
@@ -1114,6 +1441,17 @@ export class GameEngine {
       }
     }
     this.currentInteractable = best;
+
+    let bestPlayer: RemotePlayerEntity | null = null;
+    let bestPlayerDist = 3.8;
+    for (const ent of this.remotePlayers.values()) {
+      const d = this.position.distanceTo(ent.pos);
+      if (d <= bestPlayerDist) {
+        bestPlayer = ent;
+        bestPlayerDist = d;
+      }
+    }
+    this.nearbyHighFiveTarget = bestPlayer;
   }
 
   private emitHud(): void {
@@ -1135,6 +1473,12 @@ export class GameEngine {
 
     const race = this.secretManager.getRaceStatus();
 
+    const interactPrompt = this.currentInteractable
+      ? this.currentInteractable.prompt[lang]
+      : this.nearbyHighFiveTarget
+        ? `[E] ${UI_TEXT.highFivePrompt[lang]} ${this.nearbyHighFiveTarget.username}`
+        : null;
+
     this.hooks.onHudUpdate({
       zone: this.currentZone,
       zoneName: ZONE_NAMES_I18N[this.currentZone][lang],
@@ -1146,7 +1490,7 @@ export class GameEngine {
       cameraDistance: this.camDist,
       isFirstPerson: this.isFirstPerson,
       isMaxZoomOut: this.isMaxZoomOut,
-      interactPrompt: this.currentInteractable ? this.currentInteractable.prompt[lang] : null,
+      interactPrompt,
       statusBanner: this.statusBanner,
       cutsceneTitle: this.activeCutscene ? this.activeCutscene.structure.name[lang] : null,
       relicCount: this.secretManager.collectedRelics.size,

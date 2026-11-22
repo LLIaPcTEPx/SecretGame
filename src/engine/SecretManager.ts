@@ -5,20 +5,29 @@ import { ChatMessage, GameSettings, Language, SecretDef, ZoneId } from '../types
 import { EmoteType } from './Avatar';
 import { UI_TEXT } from '../i18n/translations';
 
-const STORAGE_KEY = 'secret_universe_unlocked_v1';
+const STORAGE_PREFIX = 'secret_universe_unlocked_v2_';
 
 export interface EngineCallbacks {
   onSecretUnlocked: (secret: SecretDef, totalUnlocked: number) => void;
   onStructureUnlocked: (structureId: string) => void;
   onResetWorld: () => void;
   onChatMessage: (msg: ChatMessage) => void;
+  onPublicChat: (text: string) => void;
   onEmote: (emote: EmoteType) => void;
+  onHighFiveNearest: () => void;
   onTeleport: (pos: THREE.Vector3) => void;
   onRespawn: () => void;
   onGravityBoost: () => void;
   onClearChat: () => void;
   onVisualUpdate: (event: string, payload?: string) => void;
   onStatusBanner: (text: string | null) => void;
+}
+
+export interface NearbyFriendInfo {
+  userId: string;
+  username: string;
+  distance: number;
+  lastDanceAt: number;
 }
 
 export interface PlayerContext {
@@ -32,11 +41,17 @@ export interface PlayerContext {
   settings: GameSettings;
   peakFallY: number;
   isMovingBackwards: boolean;
+  founderStatueBuilt: boolean;
+  standingOnPlayerId: string | null;
+  nearbyFriends: NearbyFriendInfo[];
+  highFivedFriendIds: Set<string>;
 }
 
 export class SecretManager {
   public unlocked = new Set<number>();
   public language: Language = 'en';
+  private userId: string;
+  private username: string;
   private cb: EngineCallbacks;
 
   private distanceWalked = 0;
@@ -48,6 +63,7 @@ export class SecretManager {
   private chronoAltarTime = 0;
   private monkSitTime = 0;
   private sessionStartTime = Date.now();
+  private lastLocalDanceAt = 0;
 
   private graphicsHistory: number[] = [];
   private volcanoGraphicsHistory: number[] = [];
@@ -71,10 +87,21 @@ export class SecretManager {
   private architectStep = 0;
   public collectedRelics = new Set<string>();
 
-  constructor(callbacks: EngineCallbacks, initialLang: Language = 'en') {
+  constructor(
+    callbacks: EngineCallbacks,
+    initialLang: Language = 'en',
+    userId = 'local',
+    username = 'Player'
+  ) {
     this.cb = callbacks;
     this.language = initialLang;
+    this.userId = userId;
+    this.username = username;
     this.loadProgress();
+  }
+
+  private get storageKey(): string {
+    return `${STORAGE_PREFIX}${this.userId}`;
   }
 
   public setLanguage(lang: Language): void {
@@ -87,7 +114,7 @@ export class SecretManager {
 
   private loadProgress(): void {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(this.storageKey);
       if (raw) {
         const arr = JSON.parse(raw);
         if (Array.isArray(arr)) {
@@ -103,7 +130,7 @@ export class SecretManager {
 
   private saveProgress(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([...this.unlocked]));
+      localStorage.setItem(this.storageKey, JSON.stringify([...this.unlocked]));
     } catch {
       // ignore
     }
@@ -177,24 +204,59 @@ export class SecretManager {
     if (structId) {
       this.cb.onStructureUnlocked(structId);
     }
+    return true;
+  }
 
-    // Milestone secrets (#96 at 50, #97 at 90)
-    if (this.unlocked.size >= 50 && !this.unlocked.has(96)) {
-      setTimeout(() => this.unlock(96), 700);
+  public onRemoteEmote(
+    _userId: string,
+    emote: string,
+    distance: number,
+    isFriend: boolean
+  ): void {
+    // Secret #96: Kindred Spirits — friend danced within 8m within 8s of your /dance!
+    if (isFriend && emote === 'dance' && distance <= 8.5 && Date.now() - this.lastLocalDanceAt <= 8000) {
+      this.unlock(96);
     }
-    if (this.unlocked.size >= 90 && !this.unlocked.has(97)) {
-      setTimeout(() => this.unlock(97), 700);
+  }
+
+  private tryUnlockUnityOfUniverse(ctx: PlayerContext): void {
+    const distFromPedestal = Math.hypot(ctx.position.x, ctx.position.z);
+    const nearPedestal = distFromPedestal <= 12 && ctx.zone === 'plaza';
+    const qualifyingFriend = ctx.nearbyFriends.find(
+      (f) => f.distance <= 8.5 && ctx.highFivedFriendIds.has(f.userId)
+    );
+    const anyNearbyFriend = ctx.nearbyFriends.find((f) => f.distance <= 8.5);
+
+    if (nearPedestal && qualifyingFriend) {
+      this.unlock(100);
+      return;
     }
-    if (this.unlocked.size === 99 && !this.unlocked.has(100)) {
+
+    if (!nearPedestal) {
       this.systemMsg(
         this.msg(
-          '✨ 99/100 SECRETS! A golden beam ignited at the center of Spawn Plaza! Stand on the Pedestal and type /universe!',
-          '✨ 99/100 СЕКРЕТОВ! В центре Площади Спавна зажёгся золотой луч! Встань на Пьедестал и введи /universe!'
+          'Stand beside the Central Plaza Pedestal together with an online Friend to awaken Unity of the Universe!',
+          'Встань у Центрального Пьедестала Площади вместе с онлайн-другом, чтобы пробудить Единство Вселенной!'
+        ),
+        'whisper'
+      );
+    } else if (!anyNearbyFriend) {
+      this.systemMsg(
+        this.msg(
+          'The Pedestal awaits true friendship: bring an online Friend within 8m of you here (add friends via the Friends menu)!',
+          'Пьедестал ждёт настоящей дружбы: приведи сюда онлайн-друга (в пределах 8м от тебя, добавь через меню Друзей)!'
+        ),
+        'whisper'
+      );
+    } else {
+      this.systemMsg(
+        this.msg(
+          `Almost there! Give ${anyNearbyFriend.username} a High-Five first (press E next to them or type /highfive), then run /universe!`,
+          `Почти готово! Сначала дай Пять другу ${anyNearbyFriend.username} (нажми E рядом или введи /highfive), а затем /universe!`
         ),
         'whisper'
       );
     }
-    return true;
   }
 
   public onGameStart(): void {
@@ -511,17 +573,7 @@ export class SecretManager {
       return;
     }
     if (key === 'final_pedestal') {
-      if (this.unlocked.size >= 99) {
-        this.unlock(100);
-      } else {
-        this.systemMsg(
-          this.msg(
-            `The Central Pedestal slumbers. Secrets found: ${this.unlocked.size} / 99 needed to awaken the finale.`,
-            `Центральный Пьедестал спит. Собрано секретов: ${this.unlocked.size} / 99 для пробуждения финала.`
-          ),
-          'system'
-        );
-      }
+      this.tryUnlockUnityOfUniverse(ctx);
       return;
     }
 
@@ -876,7 +928,7 @@ export class SecretManager {
     soundEngine.playChat();
     this.cb.onChatMessage({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      sender: UI_TEXT.playerSender[this.language],
+      sender: this.username,
       text: trimmed,
       type: 'player',
       timestamp: Date.now(),
@@ -894,10 +946,15 @@ export class SecretManager {
           this.unlock(6);
           this.systemMsg(
             this.msg(
-              'Commands: /help, /dance, /wave, /sit, /cheer, /laugh, /pos, /time, /reset, /secrets, /race, /clear. (Hint: dozens of hidden /commands await discovery!)',
-              'Команды: /help, /dance, /wave, /sit, /cheer, /laugh, /pos, /time, /reset, /secrets, /race, /clear. (Подсказка: в мире спрятано множество тайных /команд!)'
+              'Commands: /help, /dance, /wave, /sit, /cheer, /laugh, /highfive, /pos, /time, /reset, /secrets, /race, /clear. (Hint: dozens of hidden /commands await discovery!)',
+              'Команды: /help, /dance, /wave, /sit, /cheer, /laugh, /highfive, /pos, /time, /reset, /secrets, /race, /clear. (Подсказка: в мире спрятано множество тайных /команд!)'
             )
           );
+          return;
+
+        case '/highfive':
+        case '/hi5':
+          this.cb.onHighFiveNearest();
           return;
 
         case '/clear':
@@ -947,11 +1004,21 @@ export class SecretManager {
           return;
         }
 
-        case '/dance':
+        case '/dance': {
           this.cb.onEmote('dance');
           this.unlock(7);
           this.recordEmoteChain('/dance');
+          const now = Date.now();
+          this.lastLocalDanceAt = now;
+          // Secret #96: Kindred Spirits — synchronized dance with a nearby Friend!
+          const syncedFriend = ctx.nearbyFriends.find(
+            (f) => f.distance <= 8.5 && now - f.lastDanceAt <= 8000
+          );
+          if (syncedFriend) {
+            this.unlock(96);
+          }
           return;
+        }
 
         case '/sit':
           this.cb.onEmote('sit');
@@ -962,8 +1029,12 @@ export class SecretManager {
         case '/wave':
           this.cb.onEmote('wave');
           this.recordEmoteChain('/wave');
-          if (ctx.position.distanceTo(new THREE.Vector3(0, 1, -14)) < 7.5 && this.unlocked.has(5)) {
+          if (ctx.position.distanceTo(new THREE.Vector3(0, 1, -14)) < 7.5 && ctx.founderStatueBuilt) {
             this.unlock(43);
+          }
+          // Secret #97: Sky Riders — wave while standing on another player's head!
+          if (ctx.standingOnPlayerId) {
+            this.unlock(97);
           }
           return;
 
@@ -972,6 +1043,10 @@ export class SecretManager {
           this.recordEmoteChain('/cheer');
           if (Math.hypot(ctx.position.x - -30, ctx.position.z - 30) < 5.5) {
             this.unlock(57);
+          }
+          // Secret #97: Sky Riders — cheer while standing on another player's head!
+          if (ctx.standingOnPlayerId) {
+            this.unlock(97);
           }
           return;
 
@@ -1177,17 +1252,7 @@ export class SecretManager {
         }
 
         case '/universe':
-          if (this.unlocked.size >= 99) {
-            this.unlock(100);
-          } else {
-            this.systemMsg(
-              this.msg(
-                `Too soon! Unlock all 99 other secrets first (${this.unlocked.size}/99) to awaken SECRET UNIVERSE!`,
-                `Ещё рано! Собери все 99 остальных секретов (сейчас ${this.unlocked.size}/99), чтобы пробудить SECRET UNIVERSE!`
-              ),
-              'whisper'
-            );
-          }
+          this.tryUnlockUnityOfUniverse(ctx);
           return;
 
         default:
@@ -1201,6 +1266,9 @@ export class SecretManager {
           return;
       }
     }
+
+    // Broadcast non-command chat messages to all online players!
+    this.cb.onPublicChat(trimmed);
 
     // Plain chat word secrets (accept both English and Russian where applicable)
     if (lower === 'привет' || lower === 'hello' || lower === 'hi' || lower.startsWith('привет ') || lower.startsWith('hello ')) {
