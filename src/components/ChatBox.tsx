@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Send, X } from 'lucide-react';
-import { ChatMessage } from '../types/game';
+import { ChatMessage, Language } from '../types/game';
+import { UI_TEXT } from '../i18n/translations';
 
 interface ChatBoxProps {
   messages: ChatMessage[];
+  language: Language;
   onSend: (text: string) => void;
   focusTrigger: { seq: number; prefix: string } | null;
   onInputFocusChange: (focused: boolean) => void;
@@ -11,6 +13,7 @@ interface ChatBoxProps {
 
 export const ChatBox: React.FC<ChatBoxProps> = ({
   messages,
+  language,
   onSend,
   focusTrigger,
   onInputFocusChange,
@@ -61,10 +64,10 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
       <button
         className="hud-chip chat-collapsed-btn"
         onClick={() => setOpen(true)}
-        title="Открыть чат (Enter или /)"
+        title={UI_TEXT.chatOpenTitle[language]}
       >
         <MessageSquare size={16} />
-        <span>Чат</span>
+        <span>{UI_TEXT.chatCollapsed[language]}</span>
       </button>
     );
   }
@@ -74,9 +77,9 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
       <div className="chat-header">
         <div className="chat-title">
           <MessageSquare size={14} />
-          <span>Чат • Введи слово или /команду</span>
+          <span>{UI_TEXT.chatHeader[language]}</span>
         </div>
-        <button className="chat-close" onClick={() => setOpen(false)} title="Свернуть чат">
+        <button className="chat-close" onClick={() => setOpen(false)} title={UI_TEXT.chatCollapseTitle[language]}>
           <X size={14} />
         </button>
       </div>
@@ -107,10 +110,10 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
             onInputFocusChange(false);
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Нажми / или Enter для чата..."
+          placeholder={UI_TEXT.chatPlaceholder[language]}
           maxLength={120}
         />
-        <button type="submit" className="chat-send" title="Отправить">
+        <button type="submit" className="chat-send" title={UI_TEXT.chatSendTitle[language]}>
           <Send size={14} />
         </button>
       </form>

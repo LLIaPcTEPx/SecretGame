@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { Avatar, EmoteType } from './Avatar';
-import { buildWorld, InteractableItem, WorldData, ZONE_NAMES } from './WorldBuilder';
+import { Avatar } from './Avatar';
+import { buildWorld, InteractableItem, WorldData, WorldStructure } from './WorldBuilder';
 import { PlayerContext, SecretManager } from './SecretManager';
 import { soundEngine } from '../audio/soundEngine';
+import { ZONE_NAMES_I18N } from '../i18n/translations';
 import {
   ChatMessage,
   GameSettings,
@@ -14,6 +15,19 @@ import {
 
 const SPAWN_POS = new THREE.Vector3(0, 0.5, 10);
 
+type CutscenePhase = 'focus' | 'build' | 'flash' | 'hold' | 'return';
+
+interface ActiveCutscene {
+  structure: WorldStructure;
+  phase: CutscenePhase;
+  phaseTime: number;
+  buildDuration: number;
+  startCamPos: THREE.Vector3;
+  startCamLook: THREE.Vector3;
+  lastSnapSoundTime: number;
+  snappedIndices: Set<number>;
+}
+
 export interface GameEngineHooks {
   onHudUpdate: (hud: HudSnapshot) => void;
   onSecretUnlocked: (secret: SecretDef, total: number) => void;
@@ -23,6 +37,16 @@ export interface GameEngineHooks {
   onOpenPause: () => void;
   onToggleIndex: () => void;
   onFocusChat: (prefix?: string) => void;
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function easeOutBack(t: number): number {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 
 export class GameEngine {
@@ -40,7 +64,7 @@ export class GameEngine {
   // Player state
   private position = SPAWN_POS.clone();
   private velocity = new THREE.Vector3();
-  private avatarYaw = 0; // 0 = facing -Z
+  private avatarYaw = 0;
   private grounded = false;
   private coyoteTimer = 0;
   private jumpBuffer = 0;
@@ -49,7 +73,7 @@ export class GameEngine {
   private activeTriggers = new Set<string>();
   private stepTimer = 0;
 
-  // Camera state (Roblox style!)
+  // Camera state
   private camYaw = 0;
   private camPitch = 0.28;
   private targetCamDist = 11;
@@ -62,9 +86,14 @@ export class GameEngine {
   private lastMouseY = 0;
   private pointerLocked = false;
 
+  // Cutscene state
+  private cutsceneQueue: string[] = [];
+  private activeCutscene: ActiveCutscene | null = null;
+  private modalOpen = false; // tracks Pause / Index / Inspect modals so cutscenes wait until visible!
+
   // Input & UI lock
   private keys = new Set<string>();
-  public uiBlocked = false; // true when chat / pause / index / inspect open
+  public uiBlocked = false;
   private settings: GameSettings;
   private currentInteractable: InteractableItem | null = null;
   private statusBanner: string | null = null;
@@ -86,12 +115,10 @@ export class GameEngine {
     this.hooks = hooks;
     this.settings = { ...initialSettings };
 
-    // Scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0c1b33);
     this.scene.fog = new THREE.FogExp2(0x0c1b33, 0.0048);
 
-    // Camera
     this.camera = new THREE.PerspectiveCamera(
       this.settings.fov,
       container.clientWidth / Math.max(1, container.clientHeight),
@@ -99,7 +126,6 @@ export class GameEngine {
       450
     );
 
-    // Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = true;
@@ -108,7 +134,6 @@ export class GameEngine {
     this.renderer.toneMappingExposure = 1.12;
     container.appendChild(this.renderer.domElement);
 
-    // Lighting
     this.hemiLight = new THREE.HemisphereLight(0xbae6fd, 0x1e293b, 0.95);
     this.scene.add(this.hemiLight);
 
@@ -126,30 +151,48 @@ export class GameEngine {
     this.sunLight.shadow.bias = -0.0005;
     this.scene.add(this.sunLight);
 
-    // Build World & Avatar
-    this.world = buildWorld(this.scene);
+    // Build World (ALL structures start completely hidden / unbuilt!)
+    this.world = buildWorld(this.scene, this.settings.language);
     this.avatar = new Avatar();
     this.avatar.root.position.copy(this.position);
     this.scene.add(this.avatar.root);
 
-    // Secret Manager
-    this.secretManager = new SecretManager({
-      onSecretUnlocked: (secret, total) => hooks.onSecretUnlocked(secret, total),
-      onChatMessage: (msg) => hooks.onChatMessage(msg),
-      onEmote: (em) => this.avatar.setEmote(em),
-      onTeleport: (pos) => this.teleport(pos),
-      onRespawn: () => this.respawn(),
-      onGravityBoost: () => {
-        this.velocity.y = 22;
-        this.grounded = false;
-        soundEngine.playBounce();
+    this.secretManager = new SecretManager(
+      {
+        onSecretUnlocked: (secret, total) => hooks.onSecretUnlocked(secret, total),
+        onStructureUnlocked: (structureId) => this.enqueueStructureBuild(structureId),
+        onResetWorld: () => {
+          this.cutsceneQueue = [];
+          if (this.activeCutscene) {
+            this.world.setStructureFlashWhite(this.activeCutscene.structure.id, false);
+            this.activeCutscene = null;
+          }
+          this.world.resetAllStructures();
+          Object.values(this.world.relicMeshes).forEach((m) => (m.visible = true));
+          this.respawn();
+        },
+        onChatMessage: (msg) => hooks.onChatMessage(msg),
+        onEmote: (em) => this.avatar.setEmote(em),
+        onTeleport: (pos) => this.teleport(pos),
+        onRespawn: () => this.respawn(),
+        onGravityBoost: () => {
+          this.velocity.y = 22;
+          this.grounded = false;
+          soundEngine.playBounce();
+        },
+        onClearChat: () => hooks.onClearChat(),
+        onVisualUpdate: (event, payload) => this.handleWorldVisualUpdate(event, payload),
+        onStatusBanner: (text) => {
+          this.statusBanner = text;
+        },
       },
-      onClearChat: () => hooks.onClearChat(),
-      onVisualUpdate: (event, payload) => this.handleWorldVisualUpdate(event, payload),
-      onStatusBanner: (text) => {
-        this.statusBanner = text;
-      },
-    });
+      this.settings.language
+    );
+
+    // Restore already-unlocked structures immediately from saved progress (no cutscene replay on reload)
+    for (const structId of this.secretManager.getInitiallyBuiltStructures()) {
+      this.world.setStructureBuiltImmediate(structId, true);
+    }
 
     this.applyGraphicsSettings(this.settings.graphicsQuality);
     soundEngine.setVolumes(this.settings.sfxVolume, this.settings.musicVolume);
@@ -158,6 +201,223 @@ export class GameEngine {
 
     this.lastTime = performance.now();
     this.loop();
+  }
+
+  private enqueueStructureBuild(structureId: string): void {
+    const st = this.world.structures[structureId];
+    if (!st || st.built || st.animating) return;
+    if (!this.cutsceneQueue.includes(structureId)) {
+      this.cutsceneQueue.push(structureId);
+    }
+  }
+
+  private startNextCutsceneIfReady(): void {
+    if (this.activeCutscene || this.modalOpen || this.cutsceneQueue.length === 0) return;
+    const nextId = this.cutsceneQueue.shift()!;
+    const structure = this.world.structures[nextId];
+    if (!structure || structure.built) {
+      this.startNextCutsceneIfReady();
+      return;
+    }
+
+    // Stop player motion cleanly when cutscene begins
+    this.keys.clear();
+    this.velocity.x = 0;
+    this.velocity.z = 0;
+    this.isMouseDragging = false;
+
+    // Prepare Lego pieces hidden above target
+    structure.animating = true;
+    structure.group.visible = true;
+    for (const p of structure.pieces) {
+      p.obj.visible = false;
+      p.obj.position.set(p.targetPos.x, p.targetPos.y + p.dropHeight, p.targetPos.z);
+      p.obj.rotation.set(p.targetRot.x + p.tiltX, p.targetRot.y, p.targetRot.z + p.tiltZ);
+      p.obj.scale.set(0.25, 0.25, 0.25);
+    }
+
+    const { pos: curCamPos, look: curCamLook } = this.computePlayerCameraPose();
+    const pieceCount = structure.pieces.length;
+    const buildDuration = Math.max(1.15, Math.min(2.2, 0.9 + pieceCount * 0.045));
+
+    this.activeCutscene = {
+      structure,
+      phase: 'focus',
+      phaseTime: 0,
+      buildDuration,
+      startCamPos: curCamPos,
+      startCamLook: curCamLook,
+      lastSnapSoundTime: -1,
+      snappedIndices: new Set(),
+    };
+  }
+
+  private updateCutscene(dt: number): void {
+    const cs = this.activeCutscene;
+    if (!cs) return;
+
+    cs.phaseTime += dt;
+    const st = cs.structure;
+    const focusDur = 0.75;
+    const flashDur = 0.16;
+    const holdDur = 0.5; // Exact half-second after white flash!
+    const returnDur = 0.7;
+
+    if (cs.phase === 'focus') {
+      const t = Math.min(1, cs.phaseTime / focusDur);
+      const e = easeInOutCubic(t);
+      const pos = new THREE.Vector3().lerpVectors(cs.startCamPos, st.camPos, e);
+      const look = new THREE.Vector3().lerpVectors(cs.startCamLook, st.camLookAt, e);
+      this.camera.position.copy(pos);
+      this.camera.lookAt(look);
+      if (t >= 1) {
+        cs.phase = 'build';
+        cs.phaseTime = 0;
+      }
+      return;
+    }
+
+    if (cs.phase === 'build') {
+      this.camera.position.copy(st.camPos);
+      this.camera.lookAt(st.camLookAt);
+
+      const pieces = st.pieces;
+      const n = pieces.length;
+      const pieceDur = Math.min(0.32, cs.buildDuration * 0.45);
+      const spread = Math.max(0.01, cs.buildDuration - pieceDur);
+
+      for (let i = 0; i < n; i++) {
+        const p = pieces[i];
+        const startT = n <= 1 ? 0 : (i / (n - 1)) * spread;
+        const localT = (cs.phaseTime - startT) / pieceDur;
+        if (localT <= 0) {
+          p.obj.visible = false;
+          continue;
+        }
+        p.obj.visible = true;
+        const clamped = Math.min(1, localT);
+        const dropEase = easeOutBack(clamped);
+
+        // Snap from above like Lego bricks clicking together!
+        const yOffset = (1 - dropEase) * p.dropHeight;
+        p.obj.position.set(p.targetPos.x, p.targetPos.y + Math.max(-0.18, yOffset), p.targetPos.z);
+
+        const rotEase = easeInOutCubic(clamped);
+        p.obj.rotation.set(
+          p.targetRot.x + p.tiltX * (1 - rotEase),
+          p.targetRot.y,
+          p.targetRot.z + p.tiltZ * (1 - rotEase)
+        );
+
+        const sEase = Math.min(1.06, 0.25 + dropEase * 0.75);
+        const finalScaleFactor = clamped >= 1 ? 1 : sEase;
+        p.obj.scale.set(
+          p.targetScale.x * finalScaleFactor,
+          p.targetScale.y * finalScaleFactor,
+          p.targetScale.z * finalScaleFactor
+        );
+
+        if (clamped >= 0.85 && !cs.snappedIndices.has(i)) {
+          cs.snappedIndices.add(i);
+          if (cs.phaseTime - cs.lastSnapSoundTime >= 0.06) {
+            cs.lastSnapSoundTime = cs.phaseTime;
+            soundEngine.playLegoSnap(i / Math.max(1, n - 1));
+          }
+        }
+      }
+
+      if (cs.phaseTime >= cs.buildDuration + 0.05) {
+        // Snap every piece to exact final transform
+        for (const p of pieces) {
+          p.obj.visible = true;
+          p.obj.position.copy(p.targetPos);
+          p.obj.rotation.copy(p.targetRot);
+          p.obj.scale.copy(p.targetScale);
+        }
+        // Trigger the SINGLE PURE WHITE FLASH!
+        this.world.setStructureFlashWhite(st.id, true, 1.0);
+        soundEngine.playBuildComplete();
+        cs.phase = 'flash';
+        cs.phaseTime = 0;
+      }
+      return;
+    }
+
+    if (cs.phase === 'flash') {
+      this.camera.position.copy(st.camPos);
+      this.camera.lookAt(st.camLookAt);
+      if (cs.phaseTime < flashDur) {
+        // Crisp solid pure-white single flash
+        this.world.setStructureFlashWhite(st.id, true, 1.0);
+      } else {
+        // Restore original materials cleanly and begin exact 0.5s hold!
+        this.world.setStructureFlashWhite(st.id, false);
+        if (st.id === 'plaza_base') {
+          this.world.clouds.visible = true;
+        }
+        cs.phase = 'hold';
+        cs.phaseTime = 0;
+      }
+      return;
+    }
+
+    if (cs.phase === 'hold') {
+      // Wait half a second (0.5s) admiring the completed structure!
+      this.camera.position.copy(st.camPos);
+      this.camera.lookAt(st.camLookAt);
+      if (cs.phaseTime >= holdDur) {
+        cs.phase = 'return';
+        cs.phaseTime = 0;
+      }
+      return;
+    }
+
+    if (cs.phase === 'return') {
+      const t = Math.min(1, cs.phaseTime / returnDur);
+      const e = easeInOutCubic(t);
+      const { pos: playerCamPos, look: playerCamLook } = this.computePlayerCameraPose();
+      const pos = new THREE.Vector3().lerpVectors(st.camPos, playerCamPos, e);
+      const look = new THREE.Vector3().lerpVectors(st.camLookAt, playerCamLook, e);
+      this.camera.position.copy(pos);
+      this.camera.lookAt(look);
+
+      if (t >= 1) {
+        st.built = true;
+        st.animating = false;
+        this.activeCutscene = null;
+        // If another structure is queued, play it next; otherwise player can walk again!
+        this.startNextCutsceneIfReady();
+      }
+    }
+  }
+
+  private computePlayerCameraPose(): { pos: THREE.Vector3; look: THREE.Vector3 } {
+    const pivot = new THREE.Vector3(this.position.x, this.position.y + 2.02, this.position.z);
+
+    if (this.shiftLockActive && !this.isFirstPerson) {
+      const rightX = Math.cos(this.camYaw);
+      const rightZ = -Math.sin(this.camYaw);
+      pivot.x += rightX * 1.25;
+      pivot.z += rightZ * 1.25;
+    }
+
+    if (this.isFirstPerson) {
+      const look = new THREE.Vector3(
+        pivot.x - Math.sin(this.camYaw) * Math.cos(this.camPitch),
+        pivot.y - Math.sin(this.camPitch),
+        pivot.z - Math.cos(this.camYaw) * Math.cos(this.camPitch)
+      );
+      return { pos: pivot.clone(), look };
+    }
+
+    const horizDist = Math.cos(this.camPitch) * this.camDist;
+    const vertDist = Math.sin(this.camPitch) * this.camDist;
+    const pos = new THREE.Vector3(
+      pivot.x + Math.sin(this.camYaw) * horizDist,
+      pivot.y + vertDist,
+      pivot.z + Math.cos(this.camYaw) * horizDist
+    );
+    return { pos, look: pivot };
   }
 
   private handleWorldVisualUpdate(event: string, payload?: string): void {
@@ -197,6 +457,10 @@ export class GameEngine {
     const prev = { ...this.settings };
     this.settings = { ...next };
 
+    if (prev.language !== next.language) {
+      this.world.setLanguage(next.language);
+      this.secretManager.setLanguage(next.language);
+    }
     if (prev.graphicsQuality !== next.graphicsQuality) {
       this.applyGraphicsSettings(next.graphicsQuality);
     }
@@ -234,7 +498,6 @@ export class GameEngine {
       this.sunLight.castShadow = true;
       this.scene.fog = new THREE.FogExp2(0x0a172e, 0.0042);
     } else {
-      // Level 5: Ultra
       this.renderer.setPixelRatio(Math.min(2.0, dpr));
       this.renderer.shadowMap.enabled = true;
       this.sunLight.castShadow = true;
@@ -243,8 +506,9 @@ export class GameEngine {
     this.renderer.shadowMap.needsUpdate = true;
   }
 
-  public setUiBlocked(blocked: boolean): void {
+  public setUiBlocked(blocked: boolean, isModal = false): void {
     this.uiBlocked = blocked;
+    this.modalOpen = isModal;
     if (blocked) {
       this.keys.clear();
       this.isMouseDragging = false;
@@ -252,21 +516,24 @@ export class GameEngine {
         document.exitPointerLock?.();
       }
     }
+    if (!isModal) {
+      this.startNextCutsceneIfReady();
+    }
   }
 
   public toggleShiftLock(): void {
-    if (!this.settings.shiftLockEnabled) return;
+    if (!this.settings.shiftLockEnabled || this.activeCutscene) return;
     this.setShiftLock(!this.shiftLockActive);
   }
 
   public setShiftLock(active: boolean): void {
     this.shiftLockActive = active;
     soundEngine.playClick();
-    if (active && !this.uiBlocked) {
+    if (active && !this.uiBlocked && !this.activeCutscene) {
       try {
         this.renderer.domElement.requestPointerLock?.();
       } catch {
-        // Fallback smoothly if pointer lock blocked
+        // fallback
       }
     } else if (!active && !this.isFirstPerson) {
       if (document.pointerLockElement === this.renderer.domElement) {
@@ -310,30 +577,46 @@ export class GameEngine {
   }
 
   public triggerInteract(): void {
-    if (!this.currentInteractable) return;
+    if (!this.currentInteractable || this.activeCutscene) return;
     const item = this.currentInteractable;
+    const isRu = this.settings.language === 'ru';
 
     if (item.requireFirstPerson && !this.isFirstPerson) {
       soundEngine.playError();
       this.secretManager.systemMsg(
-        'Приблизь камеру в режим От первого лица (колёсико вверх / клавиша I), чтобы рассмотреть это вблизи!',
+        isRu
+          ? 'Приблизь камеру в режим От первого лица (колёсико вверх / клавиша I), чтобы рассмотреть это вблизи!'
+          : 'Zoom all the way into First Person (scroll up / key I) to inspect this up close!',
         'system'
       );
       return;
     }
     if (item.requireGraphics !== undefined && this.settings.graphicsQuality !== item.requireGraphics) {
       soundEngine.playError();
-      this.secretManager.systemMsg(`Для взаимодействия нужен уровень Графики = ${item.requireGraphics}!`, 'system');
+      this.secretManager.systemMsg(
+        isRu
+          ? `Для взаимодействия нужен уровень Графики = ${item.requireGraphics}!`
+          : `Requires Graphics Quality = ${item.requireGraphics}!`,
+        'system'
+      );
       return;
     }
     if (item.requireMinGraphics !== undefined && this.settings.graphicsQuality < item.requireMinGraphics) {
       soundEngine.playError();
-      this.secretManager.systemMsg(`Слишком низкая детализация! Поставь Графику ≥ ${item.requireMinGraphics}.`, 'system');
+      this.secretManager.systemMsg(
+        isRu
+          ? `Слишком низкая детализация! Поставь Графику ≥ ${item.requireMinGraphics}.`
+          : `Detail too low! Set Graphics Quality ≥ ${item.requireMinGraphics}.`,
+        'system'
+      );
       return;
     }
     if (item.requireMaxZoomOut && !this.isMaxZoomOut) {
       soundEngine.playError();
-      this.secretManager.systemMsg('Отдали камеру на максимум!', 'system');
+      this.secretManager.systemMsg(
+        isRu ? 'Отдали камеру на максимум!' : 'Zoom the camera all the way out!',
+        'system'
+      );
       return;
     }
 
@@ -397,7 +680,7 @@ export class GameEngine {
 
   private onMouseDown = (e: MouseEvent): void => {
     soundEngine.unlockAudio();
-    if (this.uiBlocked) return;
+    if (this.uiBlocked || this.activeCutscene) return;
 
     if (e.button === 2 || e.button === 0) {
       this.isMouseDragging = true;
@@ -409,7 +692,7 @@ export class GameEngine {
       try {
         this.renderer.domElement.requestPointerLock?.();
       } catch {
-        // fallback drag works fine
+        // fallback
       }
     }
   };
@@ -419,7 +702,7 @@ export class GameEngine {
   };
 
   private onMouseMove = (e: MouseEvent): void => {
-    if (this.uiBlocked) return;
+    if (this.uiBlocked || this.activeCutscene) return;
 
     const sens = 0.0032 * this.settings.mouseSensitivity;
     let dx = 0;
@@ -442,13 +725,14 @@ export class GameEngine {
   };
 
   private onWheel = (e: WheelEvent): void => {
-    if (this.uiBlocked) return;
+    if (this.uiBlocked || this.activeCutscene) return;
     e.preventDefault();
     const step = e.deltaY > 0 ? 1.8 : -1.8;
     this.adjustZoom(step);
   };
 
   public adjustZoom(delta: number): void {
+    if (this.activeCutscene) return;
     this.targetCamDist = Math.max(0, Math.min(52, this.targetCamDist + delta));
     if (this.targetCamDist < 0.85 && delta < 0) {
       this.targetCamDist = 0;
@@ -460,7 +744,6 @@ export class GameEngine {
   private onKeyDown = (e: KeyboardEvent): void => {
     soundEngine.unlockAudio();
 
-    // Always allow Konami tracking when not typing in an input
     const tag = (e.target as HTMLElement)?.tagName;
     const isTyping = tag === 'INPUT' || tag === 'TEXTAREA';
     if (!isTyping) {
@@ -468,13 +751,13 @@ export class GameEngine {
     }
 
     if (e.code === 'Escape') {
-      if (!isTyping) {
+      if (!isTyping && !this.activeCutscene) {
         this.hooks.onOpenPause();
       }
       return;
     }
 
-    if (isTyping) return;
+    if (isTyping || this.activeCutscene) return;
 
     if (e.code === 'Tab') {
       e.preventDefault();
@@ -538,7 +821,6 @@ export class GameEngine {
     this.lastTime = now;
     this.elapsedTime += dt;
 
-    // FPS counter
     this.frameCounter++;
     this.fpsAccum += dt;
     if (this.fpsAccum >= 0.5) {
@@ -547,8 +829,17 @@ export class GameEngine {
       this.fpsAccum = 0;
     }
 
+    // Start queued Lego cutscene if player isn't inside a modal
+    this.startNextCutsceneIfReady();
+
     this.updatePhysics(dt);
-    this.updateCamera(dt);
+
+    if (this.activeCutscene) {
+      this.updateCutscene(dt);
+    } else {
+      this.updateCamera(dt);
+    }
+
     this.updateInteractables();
     this.world.updateDynamicVisuals(
       this.elapsedTime,
@@ -556,10 +847,12 @@ export class GameEngine {
       this.isMaxZoomOut,
       this.secretManager.unlocked.size
     );
-    this.secretManager.update(dt, this.getPlayerContext());
 
-    // Aura ring feedback for timed rituals or ShiftLock
-    if (this.statusBanner && (this.statusBanner.includes('сек') || this.statusBanner.includes('Алтарь'))) {
+    if (!this.activeCutscene) {
+      this.secretManager.update(dt, this.getPlayerContext());
+    }
+
+    if (this.statusBanner && (this.statusBanner.includes('s') || this.statusBanner.includes('сек'))) {
       this.avatar.setAura(0.55 + Math.sin(this.elapsedTime * 5) * 0.25, 0xfacc15);
     } else if (this.shiftLockActive) {
       this.avatar.setAura(0.28, 0x38bdf8);
@@ -569,7 +862,6 @@ export class GameEngine {
 
     this.renderer.render(this.scene, this.camera);
 
-    // Emit HUD snapshot ~20fps for crisp UI without React overhead
     this.hudEmitAccum += dt;
     if (this.hudEmitAccum >= 0.05) {
       this.hudEmitAccum = 0;
@@ -582,10 +874,12 @@ export class GameEngine {
     const gravity = 34.0;
     const jumpVel = 13.8;
 
-    // Input direction relative to camera yaw
+    // Walking is completely disabled during Lego construction cutscenes OR when UI is blocking!
     let inputForward = 0;
     let inputRight = 0;
-    if (!this.uiBlocked) {
+    const movementLocked = this.uiBlocked || this.activeCutscene !== null;
+
+    if (!movementLocked) {
       if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) inputForward += 1;
       if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) inputForward -= 1;
       if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) inputRight += 1;
@@ -608,7 +902,6 @@ export class GameEngine {
     this.velocity.x = moveX * moveSpeed;
     this.velocity.z = moveZ * moveSpeed;
 
-    // Avatar rotation: ShiftLock or First Person forces avatar to face camera yaw!
     if (this.shiftLockActive || this.isFirstPerson) {
       this.avatarYaw = this.camYaw;
     } else if (mag > 0.05) {
@@ -619,7 +912,6 @@ export class GameEngine {
       this.avatarYaw += diff * Math.min(1, dt * 14);
     }
 
-    // Jump with coyote time & jump buffer
     if (this.grounded) {
       this.coyoteTimer = 0.12;
       this.peakFallY = this.position.y;
@@ -628,7 +920,7 @@ export class GameEngine {
       if (this.position.y > this.peakFallY) this.peakFallY = this.position.y;
     }
 
-    if (this.jumpBuffer > 0) {
+    if (this.jumpBuffer > 0 && !movementLocked) {
       this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
       if (this.coyoteTimer > 0) {
         this.velocity.y = jumpVel;
@@ -638,22 +930,22 @@ export class GameEngine {
         soundEngine.playJump();
         this.secretManager.onJump();
       }
+    } else if (movementLocked) {
+      this.jumpBuffer = 0;
     }
 
-    // Gravity
     this.velocity.y -= gravity * dt;
     if (this.velocity.y < -42) this.velocity.y = -42;
 
     const prevX = this.position.x;
     const prevZ = this.position.z;
-
     const halfW = 0.42;
     const height = 2.25;
 
-    // Resolve X
+    // Resolve X (only built structures!)
     this.position.x += this.velocity.x * dt;
     for (const c of this.world.colliders) {
-      if (c.active === false) continue;
+      if (c.active === false || !this.world.isStructureBuilt(c.structureId)) continue;
       if (
         this.position.y + height > c.minY + 0.05 &&
         this.position.y < c.maxY - 0.12 &&
@@ -670,7 +962,7 @@ export class GameEngine {
     // Resolve Z
     this.position.z += this.velocity.z * dt;
     for (const c of this.world.colliders) {
-      if (c.active === false) continue;
+      if (c.active === false || !this.world.isStructureBuilt(c.structureId)) continue;
       if (
         this.position.y + height > c.minY + 0.05 &&
         this.position.y < c.maxY - 0.12 &&
@@ -688,7 +980,7 @@ export class GameEngine {
     this.position.y += this.velocity.y * dt;
     this.grounded = false;
     for (const c of this.world.colliders) {
-      if (c.active === false) continue;
+      if (c.active === false || !this.world.isStructureBuilt(c.structureId)) continue;
       if (
         this.position.x + halfW > c.minX &&
         this.position.x - halfW < c.maxX &&
@@ -699,7 +991,12 @@ export class GameEngine {
       ) {
         if (c.hazard) {
           soundEngine.playError();
-          this.secretManager.systemMsg('Ой! Горячая лава! Возврат на Площадь.', 'error');
+          this.secretManager.systemMsg(
+            this.settings.language === 'ru'
+              ? 'Ой! Горячая лава! Возврат на Площадь.'
+              : 'Ouch! Molten lava! Returning to Spawn Plaza.',
+            'error'
+          );
           this.respawn();
           return;
         }
@@ -720,16 +1017,16 @@ export class GameEngine {
       }
     }
 
-    // Void fall detection
     if (this.position.y < -22) {
       this.secretManager.onVoidFall();
       this.respawn();
       return;
     }
 
-    // Walk distance & footsteps
     const movedDist = Math.hypot(this.position.x - prevX, this.position.z - prevZ);
-    this.secretManager.onWalk(movedDist);
+    if (!movementLocked) {
+      this.secretManager.onWalk(movedDist);
+    }
     if (this.grounded && movedDist > 0.02) {
       this.stepTimer += dt;
       if (this.stepTimer > 0.32) {
@@ -738,16 +1035,15 @@ export class GameEngine {
       }
     }
 
-    // Zone check
     const newZone = this.world.getZoneAt(this.position);
     if (newZone !== this.currentZone) {
       this.currentZone = newZone;
       this.secretManager.onZoneEnter(newZone);
     }
 
-    // Trigger volumes check
     this.activeTriggers.clear();
     for (const t of this.world.triggers) {
+      if (!this.world.isStructureBuilt(t.structureId)) continue;
       if (
         this.position.x >= t.minX &&
         this.position.x <= t.maxX &&
@@ -760,7 +1056,6 @@ export class GameEngine {
       }
     }
 
-    // Update avatar transform & animation
     this.avatar.root.position.copy(this.position);
     this.avatar.root.rotation.y = this.avatarYaw;
     const horizSpeed = movedDist / Math.max(0.001, dt);
@@ -768,8 +1063,12 @@ export class GameEngine {
   }
 
   private updateCamera(dt: number): void {
-    // Smooth follow mode gentle auto-align
-    if (this.settings.cameraMode === 'follow' && !this.isMouseDragging && !this.shiftLockActive && !this.isFirstPerson) {
+    if (
+      this.settings.cameraMode === 'follow' &&
+      !this.isMouseDragging &&
+      !this.shiftLockActive &&
+      !this.isFirstPerson
+    ) {
       const horiz = Math.hypot(this.velocity.x, this.velocity.z);
       if (horiz > 1.0) {
         let diff = this.avatarYaw - this.camYaw;
@@ -791,41 +1090,22 @@ export class GameEngine {
       this.secretManager.onCameraStateChange(this.isFirstPerson, this.isMaxZoomOut, this.getPlayerContext());
     }
 
-    const pivot = new THREE.Vector3(this.position.x, this.position.y + 2.02, this.position.z);
-
-    // Classic Roblox ShiftLock shoulder offset!
-    if (this.shiftLockActive && !this.isFirstPerson) {
-      const rightX = Math.cos(this.camYaw);
-      const rightZ = -Math.sin(this.camYaw);
-      pivot.x += rightX * 1.25;
-      pivot.z += rightZ * 1.25;
-    }
-
-    if (this.isFirstPerson) {
-      this.camera.position.copy(pivot);
-      const lookTarget = new THREE.Vector3(
-        pivot.x - Math.sin(this.camYaw) * Math.cos(this.camPitch),
-        pivot.y - Math.sin(this.camPitch),
-        pivot.z - Math.cos(this.camYaw) * Math.cos(this.camPitch)
-      );
-      this.camera.lookAt(lookTarget);
-    } else {
-      const horizDist = Math.cos(this.camPitch) * this.camDist;
-      const vertDist = Math.sin(this.camPitch) * this.camDist;
-      const camX = pivot.x + Math.sin(this.camYaw) * horizDist;
-      const camY = pivot.y + vertDist;
-      const camZ = pivot.z + Math.cos(this.camYaw) * horizDist;
-      this.camera.position.set(camX, camY, camZ);
-      this.camera.lookAt(pivot);
-    }
+    const { pos, look } = this.computePlayerCameraPose();
+    this.camera.position.copy(pos);
+    this.camera.lookAt(look);
   }
 
   private updateInteractables(): void {
+    if (this.activeCutscene) {
+      this.currentInteractable = null;
+      return;
+    }
+
     let best: InteractableItem | null = null;
     let bestDist = Infinity;
 
     for (const item of this.world.interactables) {
-      // Skip hidden relics or graphics-gated items that aren't visible
+      if (!this.world.isStructureBuilt(item.structureId)) continue;
       if (item.mesh && !item.mesh.visible) continue;
       const dist = this.position.distanceTo(item.position);
       if (dist <= item.radius && dist < bestDist) {
@@ -837,11 +1117,11 @@ export class GameEngine {
   }
 
   private emitHud(): void {
-    // Bubble chat projection
+    const lang = this.settings.language;
     let bubbleVisible = false;
     let bx = 0;
     let by = 0;
-    if (this.bubbleText && Date.now() < this.bubbleExpiresAt && !this.isFirstPerson) {
+    if (this.bubbleText && Date.now() < this.bubbleExpiresAt && !this.isFirstPerson && !this.activeCutscene) {
       const headWorld = new THREE.Vector3(this.position.x, this.position.y + 3.05, this.position.z);
       headWorld.project(this.camera);
       if (headWorld.z < 1) {
@@ -857,7 +1137,7 @@ export class GameEngine {
 
     this.hooks.onHudUpdate({
       zone: this.currentZone,
-      zoneName: ZONE_NAMES[this.currentZone],
+      zoneName: ZONE_NAMES_I18N[this.currentZone][lang],
       x: this.position.x,
       y: this.position.y,
       z: this.position.z,
@@ -866,8 +1146,9 @@ export class GameEngine {
       cameraDistance: this.camDist,
       isFirstPerson: this.isFirstPerson,
       isMaxZoomOut: this.isMaxZoomOut,
-      interactPrompt: this.currentInteractable ? this.currentInteractable.prompt : null,
+      interactPrompt: this.currentInteractable ? this.currentInteractable.prompt[lang] : null,
       statusBanner: this.statusBanner,
+      cutsceneTitle: this.activeCutscene ? this.activeCutscene.structure.name[lang] : null,
       relicCount: this.secretManager.collectedRelics.size,
       raceTimeLeft: race.timeLeft,
       raceZonesCount: race.zonesCount,

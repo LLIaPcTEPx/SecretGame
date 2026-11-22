@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Gamepad2,
+  Globe,
   Play,
   RotateCcw,
   Settings,
@@ -10,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { GameSettings } from '../types/game';
+import { GRAPHICS_LABELS_I18N, UI_TEXT } from '../i18n/translations';
 
 interface PauseMenuProps {
   settings: GameSettings;
@@ -21,14 +23,6 @@ interface PauseMenuProps {
   onSettingsTitleTripleClick: () => void;
   unlockedCount: number;
 }
-
-const GRAPHICS_LABELS: Record<1 | 2 | 3 | 4 | 5, string> = {
-  1: '1 — Минимум',
-  2: '2 — Низкая',
-  3: '3 — Средняя',
-  4: '4 — Высокая',
-  5: '5 — Ультра',
-};
 
 export const PauseMenu: React.FC<PauseMenuProps> = ({
   settings,
@@ -43,6 +37,8 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
   const [tab, setTab] = useState<'settings' | 'controls'>('settings');
   const [confirmReset, setConfirmReset] = useState(false);
   const [titleClicks, setTitleClicks] = useState(0);
+
+  const lang = settings.language;
 
   const patch = (partial: Partial<GameSettings>) => {
     onChangeSettings({ ...settings, ...partial });
@@ -64,49 +60,74 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
   return (
     <div className="modal-backdrop" onClick={onResume}>
       <div className="pause-modal" onClick={(e) => e.stopPropagation()}>
-        {/* Top bar */}
         <div className="pause-header">
           <div className="pause-title-group">
             <Settings size={22} className="spin-slow" />
             <div>
-              <h2>ПАУЗА</h2>
-              <p>Secret Universe 3D • Секретов: {unlockedCount} / 100</p>
+              <h2>{UI_TEXT.pauseTitle[lang]}</h2>
+              <p>
+                Secret Universe 3D • {UI_TEXT.secretsCountLabel[lang]}: {unlockedCount} / 100
+              </p>
             </div>
           </div>
-          <button className="modal-close-btn" onClick={onResume} title="Продолжить (Esc)">
+          <button className="modal-close-btn" onClick={onResume}>
             <X size={20} />
           </button>
         </div>
 
-        {/* Navigation tabs */}
         <div className="pause-tabs">
           <button
             className={`pause-tab ${tab === 'settings' ? 'pause-tab--active' : ''}`}
             onClick={() => setTab('settings')}
           >
             <Sliders size={16} />
-            <span onClick={handleTitleClick}>НАСТРОЙКИ</span>
+            <span onClick={handleTitleClick}>{UI_TEXT.tabSettings[lang]}</span>
           </button>
           <button
             className={`pause-tab ${tab === 'controls' ? 'pause-tab--active' : ''}`}
             onClick={() => setTab('controls')}
           >
             <Gamepad2 size={16} />
-            <span>УПРАВЛЕНИЕ</span>
+            <span>{UI_TEXT.tabControls[lang]}</span>
           </button>
         </div>
 
-        {/* Content */}
         <div className="pause-body">
           {tab === 'settings' ? (
             <div className="settings-list">
-              {/* Graphics Quality (1-5) — Used for multiple secrets! */}
+              {/* Language Switcher (English / Русский) */}
+              <div className="setting-row setting-row--lang">
+                <div className="setting-info">
+                  <div className="setting-label">
+                    <Globe size={14} style={{ display: 'inline', marginRight: 6 }} />
+                    {UI_TEXT.languageLabel[lang]}
+                  </div>
+                  <div className="setting-desc">{UI_TEXT.languageDesc[lang]}</div>
+                </div>
+                <div className="segmented-btn">
+                  <button
+                    className={lang === 'en' ? 'active' : ''}
+                    onClick={() => patch({ language: 'en' })}
+                  >
+                    English
+                  </button>
+                  <button
+                    className={lang === 'ru' ? 'active' : ''}
+                    onClick={() => patch({ language: 'ru' })}
+                  >
+                    Русский
+                  </button>
+                </div>
+              </div>
+
+              {/* Graphics Quality (1-5) */}
               <div className="setting-row setting-row--graphics">
                 <div className="setting-info">
-                  <div className="setting-label">Настройка графики (Детализация)</div>
+                  <div className="setting-label">{UI_TEXT.graphicsLabel[lang]}</div>
                   <div className="setting-desc">
-                    Текущий режим: <strong>{GRAPHICS_LABELS[settings.graphicsQuality]}</strong>.
-                    Влияет на тени, туман и скрытые объекты!
+                    {UI_TEXT.graphicsCurrent[lang]}{' '}
+                    <strong>{GRAPHICS_LABELS_I18N[settings.graphicsQuality][lang]}</strong>.{' '}
+                    {UI_TEXT.graphicsHint[lang]}
                   </div>
                 </div>
                 <div className="graphics-control">
@@ -125,7 +146,6 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                           settings.graphicsQuality === lvl ? 'gfx-bar--current' : ''
                         }`}
                         onClick={() => setGraphics(lvl)}
-                        title={`Поставить уровень графики ${lvl}`}
                       >
                         {lvl}
                       </button>
@@ -144,8 +164,8 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
               {/* Mouse Sensitivity */}
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">Чувствительность мыши</div>
-                  <div className="setting-desc">Скорость вращения камеры (шаг 0.05)</div>
+                  <div className="setting-label">{UI_TEXT.sensLabel[lang]}</div>
+                  <div className="setting-desc">{UI_TEXT.sensDesc[lang]}</div>
                 </div>
                 <div className="slider-control">
                   <input
@@ -163,8 +183,8 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
               {/* FOV */}
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">Поле зрения (FOV)</div>
-                  <div className="setting-desc">Угол обзора камеры в градусах</div>
+                  <div className="setting-label">{UI_TEXT.fovLabel[lang]}</div>
+                  <div className="setting-desc">{UI_TEXT.fovDesc[lang]}</div>
                 </div>
                 <div className="slider-control">
                   <input
@@ -182,35 +202,35 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
               {/* ShiftLock Switch */}
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">Переключатель ShiftLock</div>
-                  <div className="setting-desc">Разрешить фиксацию камеры за плечом клавишей Shift</div>
+                  <div className="setting-label">{UI_TEXT.shiftLockLabel[lang]}</div>
+                  <div className="setting-desc">{UI_TEXT.shiftLockDesc[lang]}</div>
                 </div>
                 <button
                   className={`toggle-btn ${settings.shiftLockEnabled ? 'toggle-btn--on' : ''}`}
                   onClick={() => patch({ shiftLockEnabled: !settings.shiftLockEnabled })}
                 >
-                  {settings.shiftLockEnabled ? 'ВКЛ' : 'ВЫКЛ'}
+                  {settings.shiftLockEnabled ? UI_TEXT.on[lang] : UI_TEXT.off[lang]}
                 </button>
               </div>
 
               {/* Camera Mode */}
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">Режим камеры</div>
-                  <div className="setting-desc">Классическая (свободная) или Следящая за спиной</div>
+                  <div className="setting-label">{UI_TEXT.cameraModeLabel[lang]}</div>
+                  <div className="setting-desc">{UI_TEXT.cameraModeDesc[lang]}</div>
                 </div>
                 <div className="segmented-btn">
                   <button
                     className={settings.cameraMode === 'classic' ? 'active' : ''}
                     onClick={() => patch({ cameraMode: 'classic' })}
                   >
-                    Классическая
+                    {UI_TEXT.camClassic[lang]}
                   </button>
                   <button
                     className={settings.cameraMode === 'follow' ? 'active' : ''}
                     onClick={() => patch({ cameraMode: 'follow' })}
                   >
-                    Следящая
+                    {UI_TEXT.camFollow[lang]}
                   </button>
                 </div>
               </div>
@@ -220,9 +240,9 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                 <div className="setting-info">
                   <div className="setting-label">
                     <Volume2 size={14} style={{ display: 'inline', marginRight: 5 }} />
-                    Громкость звуков (SFX)
+                    {UI_TEXT.sfxLabel[lang]}
                   </div>
-                  <div className="setting-desc">Звуки шагов, прыжков, секретов и кнопок</div>
+                  <div className="setting-desc">{UI_TEXT.sfxDesc[lang]}</div>
                 </div>
                 <div className="slider-control">
                   <input
@@ -240,8 +260,8 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
               {/* Music Volume */}
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">Громкость музыки</div>
-                  <div className="setting-desc">Космический эмбиент Secret Universe</div>
+                  <div className="setting-label">{UI_TEXT.musicLabel[lang]}</div>
+                  <div className="setting-desc">{UI_TEXT.musicDesc[lang]}</div>
                 </div>
                 <div className="slider-control">
                   <input
@@ -259,14 +279,14 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
               {/* Show Coords / FPS */}
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">Координаты (X, Y, Z) и FPS</div>
-                  <div className="setting-desc">Отображать точные координаты на экране</div>
+                  <div className="setting-label">{UI_TEXT.coordsLabel[lang]}</div>
+                  <div className="setting-desc">{UI_TEXT.coordsDesc[lang]}</div>
                 </div>
                 <button
                   className={`toggle-btn ${settings.showCoords ? 'toggle-btn--on' : ''}`}
                   onClick={() => patch({ showCoords: !settings.showCoords })}
                 >
-                  {settings.showCoords ? 'ВКЛ' : 'ВЫКЛ'}
+                  {settings.showCoords ? UI_TEXT.on[lang] : UI_TEXT.off[lang]}
                 </button>
               </div>
             </div>
@@ -274,48 +294,47 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
             <div className="controls-grid">
               <div className="control-card">
                 <kbd>W A S D</kbd> / <kbd>↑ ↓ ← →</kbd>
-                <span>Движение персонажа</span>
+                <span>{UI_TEXT.ctrlMove[lang]}</span>
               </div>
               <div className="control-card">
-                <kbd>Пробел</kbd>
-                <span>Прыжок</span>
+                <kbd>{UI_TEXT.ctrlSpace[lang]}</kbd>
+                <span>{UI_TEXT.ctrlJump[lang]}</span>
               </div>
               <div className="control-card">
-                <kbd>ПКМ / ЛКМ + мышь</kbd>
-                <span>Вращение камеры вокруг персонажа</span>
+                <kbd>{UI_TEXT.ctrlMouse[lang]}</kbd>
+                <span>{UI_TEXT.ctrlOrbit[lang]}</span>
               </div>
               <div className="control-card">
-                <kbd>Колёсико</kbd> / <kbd>I</kbd> <kbd>O</kbd>
-                <span>Приблизить (First Person) / Отдалить камеру (Eagle Eye)</span>
+                <kbd>{UI_TEXT.ctrlZoomKey[lang]}</kbd> / <kbd>I</kbd> <kbd>O</kbd>
+                <span>{UI_TEXT.ctrlZoomDesc[lang]}</span>
               </div>
               <div className="control-card">
                 <kbd>Shift</kbd>
-                <span>Включить / выключить ShiftLock (как в Роблоксе!)</span>
+                <span>{UI_TEXT.ctrlShiftDesc[lang]}</span>
               </div>
               <div className="control-card">
                 <kbd>E</kbd>
-                <span>Взаимодействие с кнопками, записками, алтарями, порталами</span>
+                <span>{UI_TEXT.ctrlInteract[lang]}</span>
               </div>
               <div className="control-card">
-                <kbd>/</kbd> или <kbd>Enter</kbd>
-                <span>Открыть чат и ввести слово или /команду</span>
+                <kbd>/</kbd> {UI_TEXT.ctrlChatKey[lang]}
+                <span>{UI_TEXT.ctrlChatDesc[lang]}</span>
               </div>
               <div className="control-card">
                 <kbd>Tab</kbd>
-                <span>Открыть / закрыть Index (100 секретов)</span>
+                <span>{UI_TEXT.ctrlIndexDesc[lang]}</span>
               </div>
               <div className="control-card">
                 <kbd>Esc</kbd>
-                <span>Пауза и Настройки</span>
+                <span>{UI_TEXT.ctrlPauseDesc[lang]}</span>
               </div>
             </div>
           )}
         </div>
 
-        {/* Footer Actions */}
         <div className="pause-footer">
           <button className="btn-primary" onClick={onResume}>
-            <Play size={16} /> Продолжить игру
+            <Play size={16} /> {UI_TEXT.resumeBtn[lang]}
           </button>
 
           <button
@@ -325,12 +344,12 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
               onResume();
             }}
           >
-            <RotateCcw size={15} /> Респавн
+            <RotateCcw size={15} /> {UI_TEXT.respawnBtn[lang]}
           </button>
 
           {!confirmReset ? (
             <button className="btn-danger-ghost" onClick={() => setConfirmReset(true)}>
-              <Trash2 size={15} /> Сбросить прогресс
+              <Trash2 size={15} /> {UI_TEXT.resetBtn[lang]}
             </button>
           ) : (
             <button
@@ -341,11 +360,10 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                 onResume();
               }}
             >
-              Точно сбросить все секреты?
+              {UI_TEXT.resetConfirm[lang]}
             </button>
           )}
 
-          {/* Hidden Secret #72 Pixel Button ("π") in bottom-right of settings! */}
           {tab === 'settings' && (
             <button
               className="hidden-pi-btn"

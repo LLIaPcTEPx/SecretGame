@@ -146,6 +146,21 @@ class SoundEngine {
     this.playTone(680, 0.07, 'sine', 0.1, 0, 820);
   }
 
+  public playLegoSnap(progress = 0): void {
+    // Tactile crisp Lego click/snap with subtle rising pitch as structure completes!
+    const base = 360 + progress * 440 + (Math.random() - 0.5) * 45;
+    this.playTone(base, 0.045, 'triangle', 0.16, 0, base * 1.45);
+    this.playTone(base * 2.1, 0.025, 'square', 0.05, 0.008, base * 1.3);
+  }
+
+  public playBuildComplete(): void {
+    // Bright gleaming chime when the structure flashes pure white!
+    this.playTone(523.25, 0.42, 'sine', 0.22, 0);
+    this.playTone(659.25, 0.42, 'sine', 0.18, 0.03);
+    this.playTone(783.99, 0.48, 'triangle', 0.18, 0.06);
+    this.playTone(1046.5, 0.58, 'sine', 0.2, 0.09);
+  }
+
   public playSecretUnlock(difficulty: DifficultyId): void {
     const patterns: Record<DifficultyId, number[]> = {
       easy: [523.25, 659.25, 783.99],

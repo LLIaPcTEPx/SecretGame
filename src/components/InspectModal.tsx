@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { Check, Copy, Eye, X } from 'lucide-react';
-import { InspectContent } from '../types/game';
+import { UI_TEXT } from '../i18n/translations';
+import { InspectContent, Language } from '../types/game';
 
 interface InspectModalProps {
   content: InspectContent | null;
+  language: Language;
   onClose: () => void;
 }
 
-export const InspectModal: React.FC<InspectModalProps> = ({ content, onClose }) => {
+export const InspectModal: React.FC<InspectModalProps> = ({ content, language, onClose }) => {
   const [copied, setCopied] = useState(false);
 
   if (!content) return null;
@@ -30,8 +32,8 @@ export const InspectModal: React.FC<InspectModalProps> = ({ content, onClose }) 
           <div className="inspect-title-wrap">
             <Eye size={19} color={content.accentColor ?? '#38bdf8'} />
             <div>
-              <h3>{content.title}</h3>
-              {content.subtitle && <p>{content.subtitle}</p>}
+              <h3>{content.title[language]}</h3>
+              {content.subtitle && <p>{content.subtitle[language]}</p>}
             </div>
           </div>
           <button className="modal-close-btn" onClick={onClose}>
@@ -40,23 +42,23 @@ export const InspectModal: React.FC<InspectModalProps> = ({ content, onClose }) 
         </div>
 
         <div className="inspect-body">
-          <p className="inspect-text">{content.body}</p>
+          <p className="inspect-text">{content.body[language]}</p>
 
           {content.code && (
             <div className="inspect-code-box">
               <code>{content.code}</code>
-              <button className="copy-btn" onClick={copyCode} title="Скопировать">
+              <button className="copy-btn" onClick={copyCode} title={UI_TEXT.copyTooltip[language]}>
                 {copied ? <Check size={15} /> : <Copy size={15} />}
               </button>
             </div>
           )}
 
-          {content.footer && <p className="inspect-footer">{content.footer}</p>}
+          {content.footer && <p className="inspect-footer">{content.footer[language]}</p>}
         </div>
 
         <div className="inspect-actions">
           <button className="btn-primary" onClick={onClose}>
-            Понятно (Esc)
+            {UI_TEXT.closeGotIt[language]}
           </button>
         </div>
       </div>

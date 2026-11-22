@@ -6,11 +6,13 @@ import { IndexModal } from './components/IndexModal';
 import { PauseMenu } from './components/PauseMenu';
 import { SecretToast } from './components/SecretToast';
 import { InspectModal } from './components/InspectModal';
+import { UI_TEXT, ZONE_NAMES_I18N } from './i18n/translations';
 import { ChatMessage, GameSettings, HudSnapshot, InspectContent, SecretDef } from './types/game';
 
-const SETTINGS_STORAGE_KEY = 'secret_universe_settings_v1';
+const SETTINGS_STORAGE_KEY = 'secret_universe_settings_v2';
 
 const DEFAULT_SETTINGS: GameSettings = {
+  language: 'en', // English by default!
   graphicsQuality: 3,
   mouseSensitivity: 1.0,
   fov: 75,
@@ -21,31 +23,16 @@ const DEFAULT_SETTINGS: GameSettings = {
   cameraMode: 'classic',
 };
 
-const INITIAL_HUD: HudSnapshot = {
-  zone: 'plaza',
-  zoneName: 'Площадь Спавна',
-  x: 0,
-  y: 0.5,
-  z: 10,
-  fps: 60,
-  shiftLockActive: false,
-  cameraDistance: 11,
-  isFirstPerson: false,
-  isMaxZoomOut: false,
-  interactPrompt: null,
-  statusBanner: null,
-  relicCount: 0,
-  raceTimeLeft: null,
-  raceZonesCount: 0,
-  bubbleText: null,
-  bubbleScreenPos: { x: 0, y: 0, visible: false },
-};
-
 function loadInitialSettings(): GameSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (raw) {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw);
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        language: parsed.language === 'ru' ? 'ru' : 'en',
+      };
     }
   } catch {
     // ignore
@@ -58,17 +45,40 @@ export const App: React.FC = () => {
   const engineRef = useRef<GameEngine | null>(null);
 
   const [settings, setSettings] = useState<GameSettings>(loadInitialSettings);
-  const [hud, setHud] = useState<HudSnapshot>(INITIAL_HUD);
+  const [hud, setHud] = useState<HudSnapshot>(() => ({
+    zone: 'plaza',
+    zoneName: ZONE_NAMES_I18N.plaza[loadInitialSettings().language],
+    x: 0,
+    y: 0.5,
+    z: 10,
+    fps: 60,
+    shiftLockActive: false,
+    cameraDistance: 11,
+    isFirstPerson: false,
+    isMaxZoomOut: false,
+    interactPrompt: null,
+    statusBanner: null,
+    cutsceneTitle: null,
+    relicCount: 0,
+    raceTimeLeft: null,
+    raceZonesCount: 0,
+    bubbleText: null,
+    bubbleScreenPos: { x: 0, y: 0, visible: false },
+  }));
+
   const [unlockedIds, setUnlockedIds] = useState<Set<number>>(new Set());
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome-sys',
-      sender: 'Система',
-      text: 'Добро пожаловать в Secret Universe 3D! Найди все 100 секретов. Введи /help или нажми Tab для Index.',
-      type: 'system',
-      timestamp: Date.now(),
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const lang = loadInitialSettings().language;
+    return [
+      {
+        id: 'welcome-sys',
+        sender: UI_TEXT.systemSender[lang],
+        text: UI_TEXT.welcomeChat[lang],
+        type: 'system',
+        timestamp: Date.now(),
+      },
+    ];
+  });
 
   const [indexOpen, setIndexOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
@@ -76,17 +86,22 @@ export const App: React.FC = () => {
   const [chatFocused, setChatFocused] = useState(false);
   const [chatFocusTrigger, setChatFocusTrigger] = useState<{ seq: number; prefix: string } | null>(null);
 
-  // Toast queue for secret unlocks
   const [toastQueue, setToastQueue] = useState<Array<{ secret: SecretDef; total: number }>>([]);
   const [activeToast, setActiveToast] = useState<{ secret: SecretDef; total: number } | null>(null);
 
-  // Sync UI-blocked state to engine
+  // Keep page <title> synchronized with active language
   useEffect(() => {
-    const blocked = indexOpen || pauseOpen || inspectContent !== null || chatFocused;
-    engineRef.current?.setUiBlocked(blocked);
+    document.title = UI_TEXT.appTitle[settings.language];
+    document.documentElement.lang = settings.language;
+  }, [settings.language]);
+
+  // Sync UI-blocked & modal-open state to engine
+  useEffect(() => {
+    const isModal = indexOpen || pauseOpen || inspectContent !== null;
+    const blocked = isModal || chatFocused;
+    engineRef.current?.setUiBlocked(blocked, isModal);
   }, [indexOpen, pauseOpen, inspectContent, chatFocused]);
 
-  // Process toast queue
   useEffect(() => {
     if (!activeToast && toastQueue.length > 0) {
       const [next, ...rest] = toastQueue;
@@ -101,7 +116,6 @@ export const App: React.FC = () => {
     return () => clearTimeout(t);
   }, [activeToast]);
 
-  // Mount Three.js engine once
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -187,16 +201,15 @@ export const App: React.FC = () => {
   const handleResetProgress = useCallback(() => {
     if (!engineRef.current) return;
     engineRef.current.secretManager.resetProgress();
-    setUnlockedIds(new Set(engineRef.current.secretManager.unlocked));
-    engineRef.current.respawn();
+    setUnlockedIds(new Set());
   }, []);
+
+  const inCutscene = hud.cutsceneTitle !== null;
 
   return (
     <div className="game-root">
-      {/* 3D WebGL Viewport */}
       <div className="canvas-container" ref={mountRef} />
 
-      {/* Main HUD Overlay */}
       <HUD
         hud={hud}
         unlockedCount={unlockedIds.size}
@@ -209,24 +222,26 @@ export const App: React.FC = () => {
         onInteractClick={() => engineRef.current?.triggerInteract()}
       />
 
-      {/* Roblox-style Chat Box */}
-      <ChatBox
-        messages={messages}
-        onSend={handleSendChat}
-        focusTrigger={chatFocusTrigger}
-        onInputFocusChange={setChatFocused}
-      />
+      {!inCutscene && (
+        <ChatBox
+          messages={messages}
+          language={settings.language}
+          onSend={handleSendChat}
+          focusTrigger={chatFocusTrigger}
+          onInputFocusChange={setChatFocused}
+        />
+      )}
 
-      {/* Secret Unlocked Toast */}
       <SecretToast
         secret={activeToast?.secret ?? null}
         totalUnlocked={activeToast?.total ?? unlockedIds.size}
+        language={settings.language}
       />
 
-      {/* Index Modal (100 Secrets + Difficulty Chart) */}
       {indexOpen && (
         <IndexModal
           unlockedIds={unlockedIds}
+          language={settings.language}
           onClose={() => setIndexOpen(false)}
           onSearchChange={(q) => engineRef.current?.secretManager.onIndexSearch(q)}
           onCounterClicks={(c) => engineRef.current?.secretManager.onIndexCounterClicks(c)}
@@ -234,7 +249,6 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Pause & Settings Modal */}
       {pauseOpen && (
         <PauseMenu
           settings={settings}
@@ -248,8 +262,11 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Inspect Modal for 3D Plaques, Books, Keyholes, Ciphers */}
-      <InspectModal content={inspectContent} onClose={() => setInspectContent(null)} />
+      <InspectModal
+        content={inspectContent}
+        language={settings.language}
+        onClose={() => setInspectContent(null)}
+      />
     </div>
   );
 };

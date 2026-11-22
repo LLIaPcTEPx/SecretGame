@@ -1,14 +1,16 @@
 import React from 'react';
 import { Award } from 'lucide-react';
 import { DIFFICULTIES } from '../data/difficulties';
-import { SecretDef } from '../types/game';
+import { UI_TEXT } from '../i18n/translations';
+import { Language, SecretDef } from '../types/game';
 
 interface SecretToastProps {
   secret: SecretDef | null;
   totalUnlocked: number;
+  language: Language;
 }
 
-export const SecretToast: React.FC<SecretToastProps> = ({ secret, totalUnlocked }) => {
+export const SecretToast: React.FC<SecretToastProps> = ({ secret, totalUnlocked, language }) => {
   if (!secret) return null;
   const d = DIFFICULTIES[secret.difficulty];
 
@@ -32,7 +34,9 @@ export const SecretToast: React.FC<SecretToastProps> = ({ secret, totalUnlocked 
       </div>
       <div className="secret-toast-body">
         <div className="secret-toast-kicker">
-          <span>СЕКРЕТ НАЙДЕН! #{secret.id}</span>
+          <span>
+            {UI_TEXT.secretFound[language]} #{secret.id}
+          </span>
           <span
             className="secret-toast-diff"
             style={{
@@ -44,9 +48,9 @@ export const SecretToast: React.FC<SecretToastProps> = ({ secret, totalUnlocked 
             {d.name}
           </span>
         </div>
-        <div className="secret-toast-title">{secret.title}</div>
+        <div className="secret-toast-title">{secret.title[language]}</div>
         <div className="secret-toast-sub">
-          {secret.lore} • <strong>{totalUnlocked} / 100</strong>
+          {secret.lore[language]} • <strong>{totalUnlocked} / 100</strong>
         </div>
       </div>
     </div>

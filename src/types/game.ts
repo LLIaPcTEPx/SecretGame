@@ -1,3 +1,10 @@
+export type Language = 'en' | 'ru';
+
+export interface LocalizedText {
+  en: string;
+  ru: string;
+}
+
 export type DifficultyId = 'easy' | 'medium' | 'hard' | 'amazing' | 'okay' | 'best';
 
 export type SecretCategory =
@@ -15,7 +22,7 @@ export type SecretCategory =
 export interface DifficultyDef {
   id: DifficultyId;
   name: string;
-  ruLabel: string;
+  label: LocalizedText;
   color: string;
   bgColor: string;
   borderColor: string;
@@ -26,17 +33,19 @@ export interface DifficultyDef {
 
 export interface SecretDef {
   id: number;
-  title: string;
+  title: LocalizedText;
   difficulty: DifficultyId;
   category: SecretCategory;
-  hint: string;
-  lore: string;
-  timeEstimate: string;
+  hint: LocalizedText;
+  lore: LocalizedText;
+  timeEstimate: LocalizedText;
+  buildsStructure?: string;
 }
 
 export type ZoneId = 'plaza' | 'forest' | 'library' | 'lab' | 'volcano' | 'sky' | 'void';
 
 export interface GameSettings {
+  language: Language;
   graphicsQuality: 1 | 2 | 3 | 4 | 5;
   mouseSensitivity: number; // 0.2 to 3.0
   fov: number; // 50 to 110
@@ -57,11 +66,11 @@ export interface ChatMessage {
 }
 
 export interface InspectContent {
-  title: string;
-  subtitle?: string;
-  body: string;
+  title: LocalizedText;
+  subtitle?: LocalizedText;
+  body: LocalizedText;
   code?: string;
-  footer?: string;
+  footer?: LocalizedText;
   accentColor?: string;
 }
 
@@ -78,6 +87,7 @@ export interface HudSnapshot {
   isMaxZoomOut: boolean;
   interactPrompt: string | null;
   statusBanner: string | null;
+  cutsceneTitle: string | null;
   relicCount: number;
   raceTimeLeft: number | null;
   raceZonesCount: number;

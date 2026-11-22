@@ -13,7 +13,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
   easy: {
     id: 'easy',
     name: 'Easy',
-    ruLabel: 'Лёгкий',
+    label: { en: 'Easy', ru: 'Лёгкий' },
     color: '#22c55e',
     bgColor: 'rgba(34, 197, 94, 0.16)',
     borderColor: '#22c55e',
@@ -24,7 +24,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
   medium: {
     id: 'medium',
     name: 'Medium',
-    ruLabel: 'Средний',
+    label: { en: 'Medium', ru: 'Средний' },
     color: '#eab308',
     bgColor: 'rgba(234, 179, 8, 0.16)',
     borderColor: '#eab308',
@@ -35,7 +35,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
   hard: {
     id: 'hard',
     name: 'Hard',
-    ruLabel: 'Сложный',
+    label: { en: 'Hard', ru: 'Сложный' },
     color: '#f97316',
     bgColor: 'rgba(249, 115, 22, 0.16)',
     borderColor: '#f97316',
@@ -46,7 +46,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
   amazing: {
     id: 'amazing',
     name: 'Amazing',
-    ruLabel: 'Потрясающий',
+    label: { en: 'Amazing', ru: 'Потрясающий' },
     color: '#ef4444',
     bgColor: 'rgba(239, 68, 68, 0.18)',
     borderColor: '#ef4444',
@@ -57,7 +57,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
   okay: {
     id: 'okay',
     name: 'Okay?',
-    ruLabel: 'Ладно?...',
+    label: { en: 'Okay?...', ru: 'Ладно?...' },
     color: '#a855f7',
     bgColor: 'rgba(168, 85, 247, 0.18)',
     borderColor: '#a855f7',
@@ -68,7 +68,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
   best: {
     id: 'best',
     name: 'Best',
-    ruLabel: 'Лучший',
+    label: { en: 'Best', ru: 'Лучший' },
     color: '#09090d',
     bgColor: 'rgba(8, 8, 14, 0.92)',
     borderColor: '#e5e7eb',
@@ -76,17 +76,4 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
     glow: '0 0 28px rgba(255, 255, 255, 0.35), inset 0 0 18px rgba(0, 0, 0, 0.95)',
     order: 5,
   },
-};
-
-export const CATEGORY_LABELS: Record<string, string> = {
-  exploration: 'Исследование',
-  camera: 'Камера',
-  chat: 'Чат',
-  command: 'Команда /',
-  cipher: 'Шифр',
-  sequence: 'Порядок',
-  settings: 'Настройки',
-  parkour: 'Паркур',
-  meta: 'Мета',
-  time: 'Время',
 };
